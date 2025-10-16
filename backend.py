@@ -1,180 +1,194 @@
-import json
-import csv
-import os
 import requests
+import json
 import time
 import urllib.parse
-from typing import List, Dict, Any, Optional, Callable
+import os
+from datetime import datetime
+from typing import List, Dict, Any, Optional
 
-# --- Mappings and Categorization ---
-
-LANGUAGE_MAPPING = {
-    'All Languages Combined': '全部语言', 'english': '英语', 'schinese': '简体中文',
-    'tchinese': '繁体中文', 'japanese': '日语', 'koreana': '韩语', 'russian': '俄语',
-    'german': '德语', 'french': '法语', 'spanish': '西班牙语', 'latam': '拉丁美洲西班牙语',
-    'portuguese': '葡萄牙语', 'brazilian': '巴西葡萄牙语', 'polish': '波兰语',
-    'turkish': '土耳其语', 'thai': '泰语', 'italian': '意大利语', 'dutch': '荷兰语',
-    'danish': '丹麦语', 'swedish': '瑞典语', 'finnish': '芬兰语', 'norwegian': '挪威语',
-    'hungarian': '匈牙利语', 'czech': '捷克语', 'romanian': '罗马尼亚语',
-    'bulgarian': '保加利亚语', 'greek': '希腊语', 'vietnamese': '越南语',
-    'ukrainian': '乌克兰语', 'türkce': '土耳其语', 'arabic': '阿拉伯语',
-    'unknown_language': '未知语言'
-}
-
-CATEGORY_MAPPING = {
-    'Overwhelmingly Positive': '好评如潮', 'Very Positive': '特别好评',
-    'Mostly Positive': '多半好评', 'Mixed': '褒贬不一', 'Mostly Negative': '多半差评',
-    'Very Negative': '特别差评', 'Overwhelmingly Negative': '差评如潮',
-    'No Reviews': '暂无评测'
-}
-
-def categorize_score(positive_rate: float) -> str:
-    """Assigns a Steam-like review category based on the positive review percentage."""
-    if positive_rate >= 95.0: return "Overwhelmingly Positive"
-    if positive_rate >= 80.0: return "Very Positive"
-    if positive_rate >= 70.0: return "Mostly Positive"
-    if positive_rate >= 40.0: return "Mixed"
-    if positive_rate >= 20.0: return "Mostly Negative"
-    return "Very Negative"
-
-def calculate_review_metrics(reviews: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Calculates review metrics for a list of reviews."""
-    total = len(reviews)
-    if total == 0:
-        return {'total': 0, 'positive': 0, 'rate': 0.00, 'category': 'No Reviews'}
-    positive_count = sum(1 for r in reviews if r.get('voted_up') is True)
-    positive_rate = (positive_count / total) * 100
-    return {
-        'total': total, 'positive': positive_count, 'rate': positive_rate,
-        'category': categorize_score(positive_rate)
-    }
-
-def analyze_and_report(input_json_filename: str, output_csv_filename: str, log_callback: Callable):
-    """Reads JSON data, analyzes reviews, and writes results to a CSV file."""
-    log_callback(f"Starting analysis of '{os.path.basename(input_json_filename)}'...")
-    if not os.path.exists(input_json_filename):
-        log_callback(f"Error: Input file not found: {input_json_filename}")
-        return
-
-    try:
-        with open(input_json_filename, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        all_reviews = data.get('reviews', [])
-    except (json.JSONDecodeError, IOError) as e:
-        log_callback(f"Error reading or decoding JSON file: {e}")
-        return
-
-    if not all_reviews:
-        log_callback("No reviews found in the JSON file. Analysis aborted.")
-        return
-
-    reviews_by_language: Dict[str, List[Dict[str, Any]]] = {}
-    for review in all_reviews:
-        lang = review.get('language', 'unknown_language')
-        reviews_by_language.setdefault(lang, []).append(review)
-
-    overall_metrics = calculate_review_metrics(all_reviews)
-    report_rows = [{
-        'Language': 'All Languages Combined',
-        'Language_CN': LANGUAGE_MAPPING['All Languages Combined'],
-        'Total Reviews': overall_metrics['total'],
-        'Positive Reviews': overall_metrics['positive'],
-        'Positive Rate': f"{overall_metrics['rate']:.2f}%",
-        'Category': overall_metrics['category'],
-        'Category_CN': CATEGORY_MAPPING.get(overall_metrics['category'], overall_metrics['category'])
-    }]
-
-    for lang_code, reviews in reviews_by_language.items():
-        lang_metrics = calculate_review_metrics(reviews)
-        category_en = lang_metrics['category']
-        report_rows.append({
-            'Language': lang_code,
-            'Language_CN': LANGUAGE_MAPPING.get(lang_code, lang_code),
-            'Total Reviews': lang_metrics['total'],
-            'Positive Reviews': lang_metrics['positive'],
-            'Positive Rate': f"{lang_metrics['rate']:.2f}%",
-            'Category': category_en,
-            'Category_CN': CATEGORY_MAPPING.get(category_en, category_en)
-        })
-
-    fieldnames = ['Language', 'Language_CN', 'Total Reviews', 'Positive Reviews', 'Positive Rate', 'Category', 'Category_CN']
-    try:
-        with open(output_csv_filename, 'w', newline='', encoding='utf-8-sig') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(report_rows)
-        log_callback(f"Analysis complete. Report saved to '{os.path.basename(output_csv_filename)}'")
-    except IOError as e:
-        log_callback(f"Error writing CSV file: {e}")
-
-
-# --- Steam API Fetching Logic ---
+# Base URL for the Steam App Reviews API
+BASE_URL = "https://store.steampowered.com/appreviews/"
 
 def get_all_steam_reviews(
     appid: int,
-    log_callback: Callable,
-    max_pages: Optional[int] = None,
     language: str = 'all',
     review_type: str = 'all',
     purchase_type: str = 'all',
     num_per_page: int = 100,
-    delay_seconds: float = 1.0 # Safety default
-) -> Optional[Dict[str, Any]]:
-    """Fetches user reviews for a specified Steam App ID."""
+    delay_seconds: float = 1.0,
+    max_pages: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Fetches user reviews for a specified Steam App ID, handling pagination
+    automatically using the 'cursor' mechanism.
+
+    Args:
+        appid: The Steam application ID (e.g., 570 for Dota 2).
+        language: The language filter (e.g., 'english'). Use 'all' for all languages.
+        review_type: Filter by 'all', 'positive', or 'negative'.
+        purchase_type: Filter by 'all', 'non_steam_purchase', or 'steam'.
+        num_per_page: Number of reviews to fetch per page (max 100).
+        delay_seconds: The time to pause between API requests to prevent rate limiting.
+        max_pages: If set, the scraping will stop after this many pages.
+
+    Returns:
+        A dictionary containing the list of all collected reviews and query summary.
+    """
+    if num_per_page > 100:
+        print("Warning: num_per_page cannot exceed 100. Setting to 100.")
+        num_per_page = 100
+
     all_reviews: List[Dict[str, Any]] = []
-    cursor = '*'
-    page_count = 0
-    url = f"https://store.steampowered.com/appreviews/{appid}"
+    cursor: str = '*'  # Initial cursor value
+    query_summary: Optional[Dict[str, Any]] = None
+    page_count: int = 0
+    url = f"{BASE_URL}{appid}"
     
-    # Using 'recent' filter is more reliable for deep pagination
+    # Static parameters for the API call
     params = {
-        'json': 1, 'filter': 'recent', 'language': language,
-        'review_type': review_type, 'purchase_type': purchase_type,
-        'num_per_page': num_per_page
+        'json': '1',
+        'filter': 'updated',
+        'language': language,
+        'review_type': review_type,
+        'purchase_type': purchase_type,
+        'num_per_page': str(num_per_page),
     }
 
-    log_callback(f"Starting review collection for App ID: {appid}")
+    print(f"Starting review collection for App ID: {appid} with filter '{params['filter']}'")
     
     while True:
         if max_pages is not None and page_count >= max_pages:
-            log_callback(f"Page limit reached: Stopping after {page_count} pages.")
+            print(f"Page limit reached: Stopping after {page_count} pages.")
             break
             
-        params['cursor'] = urllib.parse.quote(cursor)
+        params['cursor'] = cursor  # FIXED: Assign raw cursor. urlencode will handle it.
+        
         try:
-            response = requests.get(url, params=params, timeout=15)
+            # Construct query string. urlencode will correctly handle special chars in cursor.
+            query_string = urllib.parse.urlencode(params)
+            request_url = f"{url}?{query_string}"
+
+            print(f"Fetching page {page_count + 1}. ({len(all_reviews)} reviews collected)")
+            print(f"Requesting URL: {request_url}")
+
+            response = requests.get(request_url, timeout=10)
             response.raise_for_status()
             data = response.json()
+            page_count += 1
+        
         except requests.exceptions.RequestException as e:
-            log_callback(f"Error during API request: {e}")
-            return None
+            print(f"Error during API request: {e}")
+            break
         except json.JSONDecodeError:
-            log_callback("Error: Could not decode JSON response.")
-            return None
+            print("Error: Could not decode JSON response.")
+            break
 
         if data.get('success') != 1:
-            log_callback(f"API call failed. Success code: {data.get('success')}. Please check App ID.")
-            return None
+            print(f"API call failed for App ID {appid}. Success code: {data.get('success')}")
+            break
 
-        page_count += 1
+        if not query_summary:
+            query_summary = data.get('query_summary', {})
+            total_expected = query_summary.get('total_reviews', 'N/A')
+            print(f"Query summary received. Total reviews for this filter: {total_expected}")
+
         reviews = data.get('reviews', [])
         
-        if not reviews:
-            log_callback("Finished collecting reviews: Review list is empty.")
-            break
+        if reviews:
+            all_reviews.extend(reviews)
+            next_cursor = data.get('cursor')
             
-        all_reviews.extend(reviews)
-        log_callback(f"Fetched page {page_count}. Total reviews collected: {len(all_reviews)}")
-
-        next_cursor = data.get('cursor')
-        if next_cursor and next_cursor != cursor:
-            cursor = next_cursor
-            time.sleep(delay_seconds)
+            if next_cursor and next_cursor != cursor:
+                cursor = next_cursor
+                if delay_seconds > 0:
+                    print(f"Pausing for {delay_seconds} seconds...")
+                    time.sleep(delay_seconds) 
+            else:
+                print("Finished collecting reviews: No new cursor returned.")
+                break
         else:
-            log_callback("Finished collecting reviews: No new cursor.")
+            print("Finished collecting reviews: No more reviews returned.")
             break
             
-    return {
-        'metadata': { 'appid': appid, 'total_reviews_collected': len(all_reviews), 'pages_fetched': page_count},
+    results = {
+        'metadata': {
+            'appid': appid,
+            'language': language,
+            'review_type': review_type,
+            'purchase_type': purchase_type,
+            'total_reviews_collected': len(all_reviews),
+            'pages_fetched': page_count,
+            'date_collected_utc': datetime.utcnow().isoformat()
+        },
+        'query_summary': query_summary,
         'reviews': all_reviews
     }
+    return results
+
+def save_reviews_to_json(data: Dict[str, Any], folder: str = 'json', max_pages_requested: Optional[int] = None) -> None:
+    """
+    Saves the collected review data to a uniquely named JSON file.
+
+    Args:
+        data: The data dictionary returned by get_all_steam_reviews.
+        folder: The subfolder to save the JSON file in. Defaults to 'json'.
+        max_pages_requested: The maximum number of pages that were requested, used for filename.
+    """
+    if not data or 'metadata' not in data or not data.get('reviews'):
+        print("No data to save.")
+        return
+
+    metadata = data['metadata']
+    appid = metadata['appid']
+    total_reviews = metadata['total_reviews_collected']
+    
+    # Create a unique filename
+    today_str = datetime.utcnow().strftime('%Y-%m-%d')
+    # Append 'max' to the review count if a page limit was set
+    review_count_str = f"{total_reviews}" if max_pages_requested is None else f"{total_reviews}max"
+    filename = f"{appid}_{today_str}_{review_count_str}_reviews.json"
+    
+    # Ensure the output directory exists
+    try:
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+            print(f"Created directory: ./{folder}/")
+    except OSError as e:
+        print(f"Error creating directory ./{folder}/: {e}")
+        return
+
+    filepath = os.path.join(folder, filename)
+    
+    # Save the file
+    try:
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+        print("-" * 40)
+        print(f"Successfully collected {metadata['total_reviews_collected']} reviews from {metadata['pages_fetched']} pages.")
+        print(f"Data saved to {filepath}")
+        print("-" * 40)
+    except IOError as e:
+        print(f"Error saving file to {filepath}: {e}")
+
+if __name__ == "__main__":
+    # --- Configuration for standalone execution ---
+    APP_ID_TO_SCRAPE = 570  # Example: 570 for Dota 2
+    SCRAPE_LANGUAGE = 'all'
+    SCRAPE_REVIEW_TYPE = 'all'
+    REQUEST_DELAY_SECONDS = 1.0 # Be respectful to the API
+    MAX_PAGES_TO_SCRAPE = 5 # Set to None to attempt to fetch all reviews
+
+    print("--- Steam Review Scraper (Standalone Mode) ---")
+    
+    # 1. Fetch the data
+    scraped_data = get_all_steam_reviews(
+        appid=APP_ID_TO_SCRAPE, 
+        language=SCRAPE_LANGUAGE,
+        review_type=SCRAPE_REVIEW_TYPE,
+        delay_seconds=REQUEST_DELAY_SECONDS,
+        max_pages=MAX_PAGES_TO_SCRAPE
+    )
+    
+    # 2. Save the data to a file
+    save_reviews_to_json(scraped_data, max_pages_requested=MAX_PAGES_TO_SCRAPE)
+
