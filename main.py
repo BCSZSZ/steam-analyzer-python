@@ -1,213 +1,298 @@
-import customtkinter as ctk
-import tkinter.ttk as ttk
-from tkinter import messagebox
-import threading
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog
 import queue
-import time
-import datetime
+import threading
+import math
+import csv
 import os
+import re
 import json
 
 # Import the backend logic
 import backend
 
-# --- GUI Application Class ---
+class SteamReviewApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Steam Review Analysis Tool")
+        self.root.geometry("1400x700") # Increased window size for new columns
+        self.status_queue = queue.Queue()
+        self.sort_by = None
+        self.sort_reverse = False
+        self.fetch_all_var = tk.BooleanVar(value=False)
+        self.cancel_event = threading.Event()
+        self.create_widgets()
+        self.process_queue()
 
-class SteamReviewerApp(ctk.CTk):
-    def __init__(self):
-        super().__init__()
+    def create_widgets(self):
+        # --- Input Frame ---
+        input_frame = ttk.Frame(self.root, padding="10")
+        input_frame.pack(fill=tk.X)
 
-        self.title("Steam Review Fetcher & Analyzer")
-        self.geometry("1200x700")
-        self.minsize(900, 600)
-        ctk.set_appearance_mode("System")
+        ttk.Label(input_frame, text="App ID:").pack(side=tk.LEFT, padx=5)
+        self.appid_entry = ttk.Entry(input_frame, width=15)
+        self.appid_entry.pack(side=tk.LEFT, padx=5)
+        self.appid_entry.insert(0, "1022980") # Silksong
 
-        self.grid_columnconfigure(0, weight=1, minsize=280)
-        self.grid_columnconfigure(1, weight=3)
-        self.grid_rowconfigure(0, weight=1)
+        self.fetch_all_checkbox = ttk.Checkbutton(
+            input_frame, text="Fetch all available reviews", 
+            variable=self.fetch_all_var, command=self.toggle_max_reviews_entry
+        )
+        self.fetch_all_checkbox.pack(side=tk.LEFT, padx=(20, 5))
 
-        # --- Left Frame ---
-        self.left_frame = ctk.CTkFrame(self, width=300, corner_radius=10)
-        self.left_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
-        self.left_frame.grid_propagate(False)
-        self.left_frame.grid_rowconfigure(4, weight=1)
+        self.reviews_entry = ttk.Entry(input_frame, width=15)
+        self.reviews_entry.pack(side=tk.LEFT, padx=5)
+        self.reviews_entry.insert(0, "2000")
 
-        ctk.CTkLabel(self.left_frame, text="Control Panel", font=ctk.CTkFont(size=16, weight="bold")).grid(row=0, column=0, padx=20, pady=(10, 20), sticky="ew")
+        self.fetch_button = ttk.Button(input_frame, text="Fetch & Analyze", command=self.start_analysis_thread)
+        self.fetch_button.pack(side=tk.LEFT, padx=10)
 
-        ctk.CTkLabel(self.left_frame, text="Steam App ID:").grid(row=1, column=0, padx=20, pady=(10, 5), sticky="w")
-        self.appid_entry = ctk.CTkEntry(self.left_frame, placeholder_text="e.g., 570")
-        self.appid_entry.grid(row=2, column=0, padx=20, pady=5, sticky="ew")
+        # --- NEW: Standalone Analyze from JSON button ---
+        self.analyze_json_button = ttk.Button(input_frame, text="Analyze from JSON", command=self.start_json_analysis_thread)
+        self.analyze_json_button.pack(side=tk.LEFT, padx=5)
 
-        ctk.CTkLabel(self.left_frame, text="Number of Reviews:").grid(row=3, column=0, padx=20, pady=(10, 5), sticky="w")
-        review_options = [str(i * 1000) for i in range(1, 11)] + ["All"]
-        self.reviews_combobox = ctk.CTkComboBox(self.left_frame, values=review_options)
-        self.reviews_combobox.set("1000")
-        self.reviews_combobox.grid(row=4, column=0, padx=20, pady=5, sticky="new")
+        self.import_button = ttk.Button(input_frame, text="Import Report (CSV)", command=self.import_csv_report)
+        self.import_button.pack(side=tk.LEFT, padx=5)
+
+        self.cancel_button = ttk.Button(input_frame, text="Cancel", command=self.cancel_download, state=tk.DISABLED)
+        self.cancel_button.pack(side=tk.LEFT, padx=5)
+
+        # --- Information Display Frame ---
+        info_frame = ttk.LabelFrame(self.root, text="Current Data Information", padding="10")
+        info_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        self.start_button = ctk.CTkButton(self.left_frame, text="Fetch & Analyze", command=self.start_processing_thread)
-        self.start_button.grid(row=5, column=0, padx=20, pady=20, sticky="ew")
-
-        ctk.CTkLabel(self.left_frame, text="Logs:").grid(row=6, column=0, padx=20, pady=(10, 5), sticky="w")
-        self.log_textbox = ctk.CTkTextbox(self.left_frame, state="disabled")
-        self.log_textbox.grid(row=7, column=0, padx=20, pady=(5, 20), sticky="nsew")
-        self.left_frame.grid_rowconfigure(7, weight=1)
-
-        # --- Right Frame ---
-        self.right_frame = ctk.CTkFrame(self, corner_radius=10)
-        self.right_frame.grid(row=0, column=1, padx=(0, 10), pady=10, sticky="nsew")
-        self.right_frame.grid_rowconfigure(0, weight=1)
-        self.right_frame.grid_columnconfigure(0, weight=1)
-
-        self.setup_treeview()
+        self.info_appid = tk.StringVar(value="App ID: N/A")
+        self.info_total_reviews = tk.StringVar(value="Total Reviews: N/A")
+        self.info_date = tk.StringVar(value="Fetched Date: N/A")
         
-        # --- Threading Queue ---
-        self.queue = queue.Queue()
-        self.after(100, self.process_queue)
+        ttk.Label(info_frame, textvariable=self.info_appid).pack(side=tk.LEFT, padx=20)
+        ttk.Label(info_frame, textvariable=self.info_total_reviews).pack(side=tk.LEFT, padx=20)
+        ttk.Label(info_frame, textvariable=self.info_date).pack(side=tk.LEFT, padx=20)
 
-    def setup_treeview(self):
-        style = ttk.Style(self)
-        is_dark = ctk.get_appearance_mode() == "Dark"
+        # --- Report Table Frame ---
+        table_frame = ttk.Frame(self.root, padding="10")
+        table_frame.pack(fill=tk.BOTH, expand=True)
 
-        # --- Define Colors ---
-        bg_color = self._apply_appearance_mode(ctk.ThemeManager.theme["CTkFrame"]["fg_color"])
-        text_color = self._apply_appearance_mode(ctk.ThemeManager.theme["CTkLabel"]["text_color"])
-        header_bg = self._apply_appearance_mode(ctk.ThemeManager.theme["CTkButton"]["fg_color"])
+        columns = ('lang', 'lang_cn', 'total', 'positive', 'rate', 'category', 'category_cn', 
+                   'avg_games_pos', 'avg_games_neg', 'avg_play_review_pos', 'avg_play_review_neg', 
+                   'avg_play_forever_pos', 'avg_play_forever_neg')
+        self.tree = ttk.Treeview(table_frame, columns=columns, show='headings')
         
-        # Subtle stripe colors
-        stripe1 = bg_color
-        stripe2 = "#EAECEE" if not is_dark else "#2E2E2E"
-
-        style.theme_use("default")
-        style.configure("Treeview", background=bg_color, foreground=text_color, fieldbackground=bg_color, borderwidth=0, rowheight=25)
-        style.configure("Treeview.Heading", background=header_bg, foreground=text_color, relief="flat", font=('Calibri', 10, 'bold'))
-        style.map("Treeview.Heading", background=[('active', ctk.ThemeManager.theme["CTkButton"]["hover_color"])])
-
-        # --- Create Treeview ---
-        columns = ('lang_cn', 'total', 'positive', 'rate', 'cat_cn')
-        self.tree = ttk.Treeview(self.right_frame, columns=columns, show='headings', style="Treeview")
-        
-        # --- Define Tags directly on the Treeview widget (more robust) ---
-        self.tree.tag_configure("oddrow", background=stripe1)
-        self.tree.tag_configure("evenrow", background=stripe2)
-
-        bold_font = ctk.CTkFont(weight="bold")
-        category_colors = {
-            "OverwhelminglyPositive": "#1a9657", "VeryPositive": "#56a14d",
-            "MostlyPositive": "#80b918", "Mixed": "#f9c74f",
-            "MostlyNegative": "#f8961e", "VeryNegative": "#f3722c",
-            "OverwhelminglyNegative": "#f94144", "NoReviews": text_color
-        }
-        for category, color in category_colors.items():
-            self.tree.tag_configure(category, foreground=color, font=bold_font)
-
-        # --- Configure Columns ---
         headings = {
-            'lang_cn': ('Language', 150), 'total': ('Total', 80), 
-            'positive': ('Positive', 80), 'rate': ('Rate', 80), 
-            'cat_cn': ('Category', 120)
+            'lang': ('Language', 120), 'lang_cn': ('语言', 100), 
+            'total': ('Total', 80), 'positive': ('Positive', 80), 
+            'rate': ('Rate', 80), 'category': ('Category', 130), 
+            'category_cn': ('评价', 100),
+            'avg_games_pos': ('Avg Games (Pos)', 110),
+            'avg_games_neg': ('Avg Games (Neg)', 110),
+            'avg_play_review_pos': ('Play @ Review (Pos)', 120),
+            'avg_play_review_neg': ('Play @ Review (Neg)', 120),
+            'avg_play_forever_pos': ('Total Play (Pos)', 110),
+            'avg_play_forever_neg': ('Total Play (Neg)', 110)
         }
-        for col, (text, width) in headings.items():
-            self.tree.heading(col, text=text)
-            self.tree.column(col, width=width, anchor='center')
+        
+        numeric_cols = ['total', 'positive', 'rate', 'avg_games_pos', 'avg_games_neg', 
+                        'avg_play_review_pos', 'avg_play_review_neg', 
+                        'avg_play_forever_pos', 'avg_play_forever_neg']
 
-        self.tree.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        for key, (text, width) in headings.items():
+            self.tree.heading(key, text=text, command=lambda _col=key: self.sort_column(_col, numeric_cols))
+            self.tree.column(key, width=width, anchor=tk.CENTER if key in numeric_cols or key in ['lang_cn', 'category_cn'] else tk.W)
 
-    def log_message(self, message):
-        self.queue.put(("log", message))
+        self.tree.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+        
+        scrollbar = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.tree.yview)
+        self.tree.configure(yscroll=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # --- Status Log Frame ---
+        log_frame = ttk.Frame(self.root, padding="10")
+        log_frame.pack(fill=tk.X)
+        self.status_label = ttk.Label(log_frame, text="Ready.", anchor=tk.W)
+        self.status_label.pack(fill=tk.X)
+
+    def cancel_download(self):
+        self.status_label.config(text="Cancelling... please wait for the current request to finish.")
+        self.cancel_event.set()
+        self.cancel_button.config(state=tk.DISABLED)
+
+    def toggle_max_reviews_entry(self):
+        self.reviews_entry.config(state=tk.DISABLED if self.fetch_all_var.get() else tk.NORMAL)
+
+    def import_csv_report(self):
+        filepath = filedialog.askopenfilename(
+            title="Select a CSV Report File", filetypes=[("CSV Files", "*.csv")], initialdir="./reports"
+        )
+        if not filepath: return
+        try:
+            with open(filepath, 'r', encoding='utf-8-sig') as f:
+                reader = csv.DictReader(f)
+                report_data = list(reader)
+
+            if not report_data:
+                messagebox.showwarning("Empty File", "The selected CSV file is empty.")
+                return
+            
+            self.tree.delete(*self.tree.get_children())
+            
+            # Use the full list of columns to handle old and new CSVs gracefully
+            # Missing columns will just be blank, which is the desired behavior
+            all_cols = self.tree['columns']
+            for row in report_data:
+                values = [row.get(col_name, '') for col_name in reader.fieldnames]
+                self.tree.insert('', tk.END, values=values)
+
+            filename = os.path.basename(filepath)
+            match = re.match(r"(\d+)_(\d{4}-\d{2}-\d{2})_(\w+)_report\.csv", filename)
+            if match:
+                appid, date, reviews_str = match.groups()
+                reviews = reviews_str.replace('max', '') if 'max' in reviews_str else 'all'
+                self.update_info_display({'appid': appid, 'total_reviews_collected': reviews, 'date_collected_utc': date})
+            else: self.update_info_display({})
+            self.status_label.config(text=f"Successfully imported report: {filename}")
+        except Exception as e:
+            messagebox.showerror("Import Error", f"Failed to read CSV.\n\nError: {e}")
+            
+    def update_info_display(self, metadata):
+        appid = metadata.get('appid', 'N/A')
+        total_reviews = metadata.get('total_reviews_collected', 'N/A')
+        date_str = metadata.get('date_collected_utc', 'N/A')
+        if isinstance(date_str, str): date_str = date_str[:10]
+        self.info_appid.set(f"App ID: {appid}")
+        self.info_total_reviews.set(f"Total Reviews: {total_reviews}")
+        self.info_date.set(f"Fetched Date: {date_str}")
+
+    def sort_column(self, col, numeric_cols):
+        if col == self.sort_by: self.sort_reverse = not self.sort_reverse
+        else: self.sort_by, self.sort_reverse = col, False
+        
+        data = [(self.tree.set(item_id, col), item_id) for item_id in self.tree.get_children('')]
+        
+        def get_sort_key(item):
+            value_str = item[0]
+            if col in numeric_cols:
+                value_str = value_str.strip('%')
+                try:
+                    return float(value_str)
+                except ValueError:
+                    return 0.0
+            return str(value_str).lower()
+
+        data.sort(key=get_sort_key, reverse=self.sort_reverse)
+        for index, (_, item_id) in enumerate(data): self.tree.move(item_id, '', index)
+
+    def start_analysis_thread(self):
+        try:
+            appid = int(self.appid_entry.get())
+            if self.fetch_all_var.get():
+                max_pages = None
+            else:
+                max_reviews = int(self.reviews_entry.get())
+                max_pages = math.ceil(max_reviews / 100) if max_reviews > 0 else None
+        except (ValueError, tk.TclError):
+            messagebox.showerror("Invalid Input", "Please enter a valid number for App ID.")
+            return
+        
+        self.cancel_event.clear()
+        resume = False
+        checkpoint_path = os.path.join(backend.TEMP_FOLDER, f"{appid}_checkpoint.json")
+        if os.path.exists(checkpoint_path):
+            if messagebox.askyesno("Resume Download?", f"An incomplete download was found for App ID {appid}. Would you like to resume?"):
+                resume = True
+        
+        self.fetch_button.config(state=tk.DISABLED)
+        self.import_button.config(state=tk.DISABLED)
+        self.analyze_json_button.config(state=tk.DISABLED)
+        self.cancel_button.config(state=tk.NORMAL)
+        self.tree.delete(*self.tree.get_children())
+        
+        thread = threading.Thread(target=self.run_backend_job, args=(appid, max_pages, resume), daemon=True)
+        thread.start()
+
+    def run_backend_job(self, appid, max_pages, resume):
+        scraped_data = backend.get_all_steam_reviews(
+            appid, status_queue=self.status_queue, max_pages=max_pages, 
+            cancel_event=self.cancel_event, resume=resume
+        )
+        if scraped_data and scraped_data.get('reviews'):
+            backend.save_reviews_to_json(scraped_data, self.status_queue)
+            report_data = backend.analyze_and_save_report(scraped_data, self.status_queue)
+            if report_data:
+                self.status_queue.put({'type': 'report', 'data': report_data, 'metadata': scraped_data.get('metadata', {})})
+        elif not self.cancel_event.is_set():
+             self.status_queue.put("No reviews were collected. Cannot generate a report.")
+        self.status_queue.put({'type': 'done'})
+
+    def start_json_analysis_thread(self):
+        """Opens a file dialog to select a JSON and starts the analysis in a thread."""
+        filepath = filedialog.askopenfilename(
+            title="Select a Raw Review JSON File",
+            filetypes=[("JSON Files", "*.json")],
+            initialdir="./json" # Start in the json folder
+        )
+        if not filepath:
+            return
+
+        self.fetch_button.config(state=tk.DISABLED)
+        self.import_button.config(state=tk.DISABLED)
+        self.analyze_json_button.config(state=tk.DISABLED)
+        self.tree.delete(*self.tree.get_children())
+        
+        thread = threading.Thread(target=self.run_json_analysis_job, args=(filepath,), daemon=True)
+        thread.start()
+
+    def run_json_analysis_job(self, filepath):
+        """Loads a JSON file and runs the analysis backend job."""
+        try:
+            self.status_queue.put(f"Loading and analyzing {os.path.basename(filepath)}...")
+            with open(filepath, 'r', encoding='utf-8') as f:
+                review_data = json.load(f)
+
+            if review_data and review_data.get('reviews'):
+                report_data = backend.analyze_and_save_report(review_data, self.status_queue)
+                if report_data:
+                    self.status_queue.put({'type': 'report', 'data': report_data, 'metadata': review_data.get('metadata', {})})
+            else:
+                self.status_queue.put("JSON file is invalid or contains no reviews.")
+
+        except json.JSONDecodeError:
+            self.status_queue.put("Error: Invalid JSON format.")
+            messagebox.showerror("JSON Error", "The selected file is not a valid JSON file.")
+        except Exception as e:
+            self.status_queue.put(f"An error occurred: {e}")
+            messagebox.showerror("Analysis Error", f"An unexpected error occurred:\n\n{e}")
+        finally:
+            self.status_queue.put({'type': 'done'})
 
     def process_queue(self):
         try:
-            msg_type, data = self.queue.get_nowait()
-            if msg_type == "log":
-                self.log_textbox.configure(state="normal")
-                self.log_textbox.insert("end", data + "\n")
-                self.log_textbox.see("end")
-                self.log_textbox.configure(state="disabled")
-            elif msg_type == "analysis_complete":
-                self.populate_treeview(data)
-            elif msg_type == "processing_finished":
-                self.start_button.configure(state="normal", text="Fetch & Analyze")
+            message = self.status_queue.get_nowait()
+            if isinstance(message, dict):
+                msg_type = message.get('type')
+                if msg_type == 'report':
+                    self.populate_table(message['data'])
+                    self.update_info_display(message['metadata'])
+                elif msg_type == 'done':
+                    self.fetch_button.config(state=tk.NORMAL)
+                    self.import_button.config(state=tk.NORMAL)
+                    self.analyze_json_button.config(state=tk.NORMAL)
+                    self.cancel_button.config(state=tk.DISABLED)
+                    if not self.cancel_event.is_set():
+                        self.status_label.config(text="Process finished.")
+            else:
+                self.status_label.config(text=message)
         except queue.Empty:
             pass
         finally:
-            self.after(100, self.process_queue)
+            self.root.after(100, self.process_queue)
 
-    def start_processing_thread(self):
-        appid_str = self.appid_entry.get()
-        if not appid_str.isdigit():
-            messagebox.showerror("Invalid Input", "App ID must be a number.")
-            return
-
-        self.start_button.configure(state="disabled", text="Working...")
-        self.log_textbox.configure(state="normal")
-        self.log_textbox.delete("1.0", "end")
-        self.log_textbox.configure(state="disabled")
-        
-        for i in self.tree.get_children():
-            self.tree.delete(i)
-
-        thread = threading.Thread(target=self.worker_task, daemon=True)
-        thread.start()
-
-    def worker_task(self):
-        try:
-            appid = int(self.appid_entry.get())
-            num_reviews_str = self.reviews_combobox.get()
-            
-            max_pages = None
-            if num_reviews_str.isdigit():
-                max_pages = int(num_reviews_str) // 100
-                
-            scraped_data = backend.get_all_steam_reviews(appid, self.log_message, max_pages)
-            
-            if not scraped_data or not scraped_data.get('reviews'):
-                self.log_message("Failed to retrieve reviews or no reviews found.")
-                return
-
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            json_filename = f"reviews_{appid}_{num_reviews_str}_{timestamp}.json"
-            csv_filename = f"analysis_{appid}_{num_reviews_str}_{timestamp}.csv"
-
-            try:
-                with open(json_filename, 'w', encoding='utf-8') as f:
-                    json.dump(scraped_data, f, ensure_ascii=False, indent=4)
-                self.log_message(f"Successfully saved {len(scraped_data['reviews'])} reviews to '{os.path.basename(json_filename)}'")
-            except IOError as e:
-                self.log_message(f"Error saving JSON file: {e}")
-                return
-
-            backend.analyze_and_report(json_filename, csv_filename, self.log_message)
-            if os.path.exists(csv_filename):
-                self.queue.put(("analysis_complete", csv_filename))
-            
-            os.remove(json_filename)
-            self.log_message(f"Cleaned up temporary file: {os.path.basename(json_filename)}")
-
-        except Exception as e:
-            self.log_message(f"An unexpected error occurred: {e}")
-        finally:
-            self.queue.put(("processing_finished", None))
-            
-    def populate_treeview(self, csv_filepath):
-        try:
-            with open(csv_filepath, 'r', encoding='utf-8-sig') as f:
-                reader = backend.csv.DictReader(f)
-                for i, row in enumerate(reader):
-                    values = (
-                        row['Language_CN'], row['Total Reviews'],
-                        row['Positive Reviews'], row['Positive Rate'],
-                        row['Category_CN']
-                    )
-                    
-                    stripe_tag = "evenrow" if i % 2 == 0 else "oddrow"
-                    category_tag = row['Category'].replace(' ', '')
-                    
-                    self.tree.insert('', 'end', values=values, tags=(stripe_tag, category_tag))
-            self.log_message(f"Displayed report from '{os.path.basename(csv_filepath)}'")
-        except Exception as e:
-            self.log_message(f"Failed to read or display CSV file: {e}")
+    def populate_table(self, report_data):
+        self.tree.delete(*self.tree.get_children())
+        for row_dict in report_data:
+            values = list(row_dict.values())
+            self.tree.insert('', tk.END, values=values)
 
 if __name__ == "__main__":
-    app = SteamReviewerApp()
-    app.mainloop()
-
+    root = tk.Tk()
+    app = SteamReviewApp(root)
+    root.mainloop()
