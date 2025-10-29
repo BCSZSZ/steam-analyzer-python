@@ -4,16 +4,20 @@ import csv
 import time
 import urllib.parse
 import os
+import re
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 import threading
 
+# Import analyzers
+from analyzers.language_report import LanguageReportAnalyzer
+
 # --- Constants and Mappings ---
 BASE_URL = "https://store.steampowered.com/appreviews/"
-TEMP_FOLDER = 'temp' # Folder for temporary checkpoint files
-JSON_FOLDER = 'json' # Folder for final raw data
-REPORTS_FOLDER = 'reports' # Folder for final analysis
-CHECKPOINT_INTERVAL_PAGES = 50 # Save a checkpoint every 50 pages (5000 reviews)
+TEMP_FOLDER = 'data/cache'
+JSON_FOLDER = 'data/raw'
+REPORTS_FOLDER = 'data/processed/reports'
+CHECKPOINT_INTERVAL_PAGES = 50
 
 LANGUAGE_MAPPING = {
     'All Languages Combined': '全部语言', 'english': '英语', 'schinese': '简体中文',
@@ -33,11 +37,9 @@ CATEGORY_MAPPING = {
     'No Reviews': '暂无评测'
 }
 
-# --- Part 1: Data Fetching (Backend Logic) ---
-# THIS SECTION IS UNCHANGED AS REQUESTED.
+# --- Part 1: Data Fetching (Unchanged) ---
 
 def get_recent_review_summary(appid: int) -> Optional[Dict[str, int]]:
-    """Fetches the RECENT review counts (not the all-time total)."""
     url = f"{BASE_URL}{appid}"
     params = {'json': '1', 'language': 'all'}
     try:
@@ -62,10 +64,6 @@ def get_all_steam_reviews(
     resume: bool = False,
     **kwargs
 ) -> Optional[Dict[str, Any]]:
-    """
-    Fetches user reviews with resumable download logic.
-    Saves checkpoints periodically and can resume from them.
-    """
     checkpoint_path = os.path.join(TEMP_FOLDER, f"{appid}_checkpoint.json")
     all_reviews: List[Dict[str, Any]] = []
     cursor = '*'
@@ -81,7 +79,6 @@ def get_all_steam_reviews(
             status_queue.put(f"Could not load checkpoint: {e}. Starting fresh.")
             all_reviews, cursor = [], '*'
     elif os.path.exists(checkpoint_path):
-         # If not resuming, clean up old checkpoint
         os.remove(checkpoint_path)
 
     params = {
@@ -182,120 +179,22 @@ def save_reviews_to_json(data: Dict[str, Any], status_queue) -> None:
     except IOError as e:
         status_queue.put(f"Error saving raw JSON file: {e}")
 
-# --- Part 2: Data Analysis (Backend Logic) ---
-# THIS SECTION IS MODIFIED AS REQUESTED.
+# --- Part 2: Data Analysis (Updated) ---
 
-def categorize_score(positive_rate: float) -> str:
-    if positive_rate >= 95.0: return "Overwhelmingly Positive"
-    if positive_rate >= 80.0: return "Very Positive"
-    if positive_rate >= 70.0: return "Mostly Positive"
-    if positive_rate >= 40.0: return "Mixed"
-    if positive_rate >= 20.0: return "Mostly Negative"
-    return "Very Negative"
-
-def calculate_review_metrics(reviews: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Calculates expanded metrics for a list of reviews."""
-    total_reviews = len(reviews)
-    if total_reviews == 0:
-        return {
-            'total': 0, 'positive': 0, 'rate': 0.0, 'category': 'No Reviews',
-            'avg_games_pos': 0, 'avg_games_neg': 0, 'avg_playtime_review_pos': 0,
-            'avg_playtime_review_neg': 0, 'avg_playtime_forever_pos': 0, 'avg_playtime_forever_neg': 0
-        }
-
-    pos_reviews, neg_reviews = [], []
-    for r in reviews:
-        if r.get('voted_up'): pos_reviews.append(r)
-        else: neg_reviews.append(r)
-
-    pos_count = len(pos_reviews)
-    neg_count = len(neg_reviews)
+def analyze_and_save_report(review_data: Dict[str, Any], status_queue, game_title: str = "N/A") -> Optional[List[Dict]]:
+    """
+    Wrapper function for backward compatibility.
+    Uses the LanguageReportAnalyzer to generate reports.
     
-    rate = (pos_count / total_reviews) * 100 if total_reviews > 0 else 0
-    category = categorize_score(rate)
+    Args:
+        review_data: Dictionary containing 'metadata' and 'reviews'
+        status_queue: Queue for status updates
+        game_title: Title of the game
+        
+    Returns:
+        List of report row dictionaries, or None if no reviews
+    """
+    analyzer = LanguageReportAnalyzer(reports_folder=REPORTS_FOLDER)
+    return analyzer.analyze(review_data, game_title=game_title, status_queue=status_queue)
 
-    # --- Calculate Averages for Positive Reviewers ---
-    if pos_count > 0:
-        avg_games_pos = sum(r['author'].get('num_games_owned', 0) for r in pos_reviews) / pos_count
-        # Convert minutes to hours
-        avg_playtime_review_pos = (sum(r['author'].get('playtime_at_review', 0) for r in pos_reviews) / pos_count) / 60
-        avg_playtime_forever_pos = (sum(r['author'].get('playtime_forever', 0) for r in pos_reviews) / pos_count) / 60
-    else:
-        avg_games_pos, avg_playtime_review_pos, avg_playtime_forever_pos = 0, 0, 0
 
-    # --- Calculate Averages for Negative Reviewers ---
-    if neg_count > 0:
-        avg_games_neg = sum(r['author'].get('num_games_owned', 0) for r in neg_reviews) / neg_count
-        # Convert minutes to hours
-        avg_playtime_review_neg = (sum(r['author'].get('playtime_at_review', 0) for r in neg_reviews) / neg_count) / 60
-        avg_playtime_forever_neg = (sum(r['author'].get('playtime_forever', 0) for r in neg_reviews) / neg_count) / 60
-    else:
-        avg_games_neg, avg_playtime_review_neg, avg_playtime_forever_neg = 0, 0, 0
-
-    return {
-        'total': total_reviews, 'positive': pos_count, 'rate': rate, 'category': category,
-        'avg_games_pos': avg_games_pos, 'avg_games_neg': avg_games_neg,
-        'avg_playtime_review_pos': avg_playtime_review_pos, 'avg_playtime_review_neg': avg_playtime_review_neg,
-        'avg_playtime_forever_pos': avg_playtime_forever_pos, 'avg_playtime_forever_neg': avg_playtime_forever_neg
-    }
-
-def analyze_and_save_report(review_data: Dict[str, Any], status_queue) -> Optional[List[Dict]]:
-    """Analyzes data with new metrics, saves CSV report, and returns report data."""
-    all_reviews = review_data.get('reviews', [])
-    if not all_reviews:
-        status_queue.put("No reviews found for analysis.")
-        return None
-
-    reviews_by_language = {}
-    for review in all_reviews:
-        lang = review.get('language', 'unknown_language')
-        reviews_by_language.setdefault(lang, []).append(review)
-
-    report_rows = []
-    
-    def format_metrics(metrics: Dict) -> Dict:
-        """Formats the calculated metrics into a dictionary for the report row."""
-        return {
-            'Language': lang_code if 'lang_code' in locals() else 'All Languages Combined',
-            'Language_CN': LANGUAGE_MAPPING.get(lang_code if 'lang_code' in locals() else 'All Languages Combined', lang_code if 'lang_code' in locals() else ''),
-            'Total Reviews': metrics['total'],
-            'Positive Reviews': metrics['positive'],
-            'Positive Rate': f"{metrics['rate']:.2f}%",
-            'Category': metrics['category'],
-            'Category_CN': CATEGORY_MAPPING.get(metrics['category']),
-            'Avg Games (Pos)': f"{metrics['avg_games_pos']:.1f}",
-            'Avg Games (Neg)': f"{metrics['avg_games_neg']:.1f}",
-            'Avg Playtime@Review (Pos, hrs)': f"{metrics['avg_playtime_review_pos']:.1f}",
-            'Avg Playtime@Review (Neg, hrs)': f"{metrics['avg_playtime_review_neg']:.1f}",
-            'Avg Playtime Total (Pos, hrs)': f"{metrics['avg_playtime_forever_pos']:.1f}",
-            'Avg Playtime Total (Neg, hrs)': f"{metrics['avg_playtime_forever_neg']:.1f}"
-        }
-
-    overall_metrics = calculate_review_metrics(all_reviews)
-    report_rows.append(format_metrics(overall_metrics))
-
-    for lang_code, reviews in sorted(reviews_by_language.items()):
-        lang_metrics = calculate_review_metrics(reviews)
-        report_rows.append(format_metrics(lang_metrics))
-    
-    metadata = review_data['metadata']
-    appid = metadata['appid']
-    total_reviews = metadata['total_reviews_collected']
-    today_str = datetime.utcnow().strftime('%Y-%m-%d')
-    count_str = "all" if metadata.get('max_pages_requested') is None else f"{total_reviews}max"
-    report_filename = f"{appid}_{today_str}_{count_str}_report.csv"
-    
-    os.makedirs(REPORTS_FOLDER, exist_ok=True)
-    filepath = os.path.join(REPORTS_FOLDER, report_filename)
-
-    fieldnames = list(report_rows[0].keys())
-    try:
-        with open(filepath, 'w', newline='', encoding='utf-8-sig') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(report_rows)
-        status_queue.put(f"Analysis complete. Report saved to {filepath}")
-    except IOError as e:
-        status_queue.put(f"Error writing CSV report: {e}")
-    
-    return report_rows
