@@ -11,6 +11,9 @@ import threading
 # Import tab modules
 from tabs.data_collection_tab import DataCollectionTab
 from tabs.extreme_reviews_tab import ExtremeReviewsTab
+from tabs.text_insights_tab import TextInsightsTab
+from tabs.ngram_analysis_tab import NgramAnalysisTab
+from tabs.tfidf_analysis_tab import TfidfAnalysisTab
 
 
 class SteamReviewApp:
@@ -35,6 +38,9 @@ class SteamReviewApp:
         # Create tabs
         self.data_collection_tab = DataCollectionTab(self.notebook, self)
         self.extreme_reviews_tab = ExtremeReviewsTab(self.notebook, self)
+        self.text_insights_tab = TextInsightsTab(self.notebook, self)
+        self.ngram_analysis_tab = NgramAnalysisTab(self.notebook, self)
+        self.tfidf_analysis_tab = TfidfAnalysisTab(self.notebook, self)
         
         # Start queue processing
         self.process_queue()

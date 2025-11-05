@@ -42,6 +42,7 @@ Steam Review Analyzer is a powerful desktop application designed for game develo
 ### Current Features
 
 #### 📊 Data Collection & Analysis
+
 - Fetch reviews from any Steam game by App ID
 - Choose between fetching all reviews or a specific count
 - Automatic game name resolution via Steam Store API with local caching
@@ -50,11 +51,13 @@ Steam Review Analyzer is a powerful desktop application designed for game develo
 - Resume interrupted downloads from automatic checkpoints (saved every 50 pages)
 
 #### 🌍 Multi-Language Support
+
 - Analysis across 20+ languages including English, Chinese (Simplified & Traditional), Japanese, Korean, Russian, and more
 - Chinese translations for language names and review categories
 - Per-language sentiment statistics and metrics
 
 #### 📈 Advanced Analytics
+
 - **Sentiment Analysis**: Positive/negative review counts and percentages
 - **Steam Categories**: Automatic categorization (Overwhelmingly Positive, Very Positive, Mixed, etc.)
 - **Playtime Metrics**: Average playtime at review time and total playtime (positive vs negative)
@@ -62,6 +65,7 @@ Steam Review Analyzer is a powerful desktop application designed for game develo
 - **Extreme Reviews**: Identify reviews with longest playtime per language (2 battles: playtime@review and total playtime)
 
 #### 🎨 User Interface
+
 - Clean tabbed interface for different analysis types
 - Sortable data tables with multi-column support
 - Visual comparison cards for extreme reviews with winner highlighting
@@ -71,13 +75,14 @@ Steam Review Analyzer is a powerful desktop application designed for game develo
 ### 🔮 Upcoming Features
 
 More analysis tabs and features are planned! The modular architecture makes it easy to add:
+
 - **Sentiment Timeline Tab**: Track review sentiment changes over time
 - **Word Cloud Tab**: Visualize common themes in positive/negative reviews
 - **Comparison Tab**: Compare multiple games side-by-side
 - **Export Options**: Additional export formats (Excel, PDF reports)
 - **Advanced Filters**: Filter by review date, playtime range, etc.
 
-*See [Roadmap](#roadmap) for detailed future plans.*
+_See [Roadmap](#roadmap) for detailed future plans._
 
 ---
 
@@ -104,12 +109,14 @@ cd steam-analyzer-python
 It's strongly recommended to use a virtual environment to isolate dependencies.
 
 **On Windows:**
+
 ```bash
 python -m venv venv
 .\venv\Scripts\activate
 ```
 
 **On macOS/Linux:**
+
 ```bash
 python3 -m venv venv
 source venv/bin/activate
@@ -124,6 +131,7 @@ pip install -r requirements.txt
 ```
 
 **Required packages:**
+
 - `requests` - For Steam API communication
 - `customtkinter` - Modern UI components (optional, falls back to tkinter)
 
@@ -156,9 +164,11 @@ The main tab for fetching and analyzing Steam reviews.
 #### Fetching Reviews
 
 1. **App ID Input**: Enter the Steam App ID (find it in the game's Steam URL)
+
    - Example: `https://store.steampowered.com/app/1030300/` → App ID is `1030300`
 
 2. **Review Count Options**:
+
    - **Specific Count**: Enter number (e.g., 2000) - will fetch ~20 pages
    - **Fetch All**: Check box to download all available reviews (can take hours for popular games)
 
@@ -175,6 +185,7 @@ If a download is interrupted, the app automatically saves a checkpoint every 50 
 #### Understanding the Report
 
 The generated table shows:
+
 - **Language**: ISO language code (english, schinese, japanese, etc.)
 - **Total Reviews**: Number of reviews in that language
 - **Positive Rate**: Percentage of positive (thumbs up) reviews
@@ -205,16 +216,19 @@ By default, shows **English and Chinese** reviews. To view other languages:
 For each language, two battles are shown:
 
 **⚔️ Battle 1: Longest Playtime @ Review**
+
 - Shows the review that was written after the most hours played
 - Compares positive vs negative review
 - Winner highlighted in yellow
 
 **⚔️ Battle 2: Longest Total Playtime**
+
 - Shows the review from the user with the most total hours (current)
 - Compares positive vs negative review
 - Winner highlighted in yellow
 
 Each card displays:
+
 - Playtime at review time (hours when review was written)
 - Total playtime (current total hours)
 - Games owned by reviewer
@@ -258,11 +272,13 @@ steam-analyzer-python/
 The architecture is designed for easy extension:
 
 **To add a new analyzer:**
+
 1. Create a class inheriting from `BaseAnalyzer` in `analyzers/`
 2. Implement `analyze(json_data)` method
 3. Return results and save to `data/processed/`
 
 **To add a new tab:**
+
 1. Create a class inheriting from `BaseTab` in `tabs/`
 2. Implement `get_tab_title()` and `create_ui()` methods
 3. Import and instantiate in `main.py`
@@ -301,24 +317,28 @@ User Input → Backend.fetch_reviews() → Save JSON → Analyzer.analyze() → 
 ### File Naming Conventions
 
 **Raw Review Data:**
+
 ```
 {appid}_{date}_{count}_reviews.json
 Example: 1030300_2025-11-05_2000max_reviews.json
 ```
 
 **CSV Reports:**
+
 ```
 {appid}_{game_title}_{date}_{count}_report.csv
 Example: 1030300_Baldur_s_Gate_3_2025-11-05_2000max_report.csv
 ```
 
 **Extreme Reviews:**
+
 ```
 {appid}_extreme_reviews_by_language_{date}.json
 Example: 1030300_extreme_reviews_by_language_2025-11-05.json
 ```
 
 **Checkpoints:**
+
 ```
 {appid}_checkpoint.json
 Example: 1030300_checkpoint.json
@@ -337,6 +357,7 @@ Example: 1030300_checkpoint.json
 ## 🗺️ Roadmap
 
 ### Phase 1: Core Features ✅
+
 - [x] Basic review fetching
 - [x] Language-based CSV reports
 - [x] Extreme playtime analysis
@@ -345,6 +366,7 @@ Example: 1030300_checkpoint.json
 - [x] Game name auto-fetch with caching
 
 ### Phase 2: Enhanced Analytics (In Progress)
+
 - [x] Per-language filtering in extreme reviews
 - [x] Visual comparison cards with winner highlighting
 - [ ] Sentiment timeline analysis
@@ -352,6 +374,7 @@ Example: 1030300_checkpoint.json
 - [ ] Weighted scoring system
 
 ### Phase 3: Advanced Features (Planned)
+
 - [ ] Word cloud generation from review text
 - [ ] Topic modeling and theme extraction
 - [ ] Multi-game comparison view
@@ -360,6 +383,7 @@ Example: 1030300_checkpoint.json
 - [ ] Automated report scheduling
 
 ### Phase 4: Community Features (Future)
+
 - [ ] Share analysis configurations
 - [ ] Custom analyzer plugins
 - [ ] REST API for programmatic access

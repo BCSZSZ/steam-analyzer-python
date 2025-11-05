@@ -1,9 +1,11 @@
 # App ID Type Handling Audit
 
 ## Overview
+
 This document tracks how App IDs are handled across the codebase to ensure proper type consistency for `utils.get_game_name(appid)` calls.
 
 ## Type Requirements
+
 - `utils.get_game_name(appid)` expects **INTEGER** parameter
 - All file saving functions use **INTEGER** appid
 - Regex extraction from filenames returns **STRINGS** → must convert to int
@@ -11,18 +13,24 @@ This document tracks how App IDs are handled across the codebase to ensure prope
 ## File Naming Patterns
 
 ### CSV Reports
+
 **Format**: `{appid}_{sanitized_title}_{date}_{count_str}_report.csv`
+
 - **Example**: `1030300_Baldur_s_Gate_3_2025-10-16_2000max_report.csv`
 - **Saved as**: INT appid (line 201 in `analyzers/language_report.py`)
 
 ### JSON Raw Data
+
 **Format**: `{appid}_{date}_{count_str}_reviews.json`
+
 - **Example**: `1030300_2025-10-16_281603_reviews.json`
 - **Saved as**: INT appid (line 171 in `backend.py`)
 - **Metadata contains**: INT appid (line 141 in `backend.py`)
 
 ### Extreme Review Results
+
 **Format**: `{appid}_extreme_reviews_by_language_{date}.json`
+
 - **Saved as**: INT appid
 - **Metadata contains**: INT appid (passed through from source JSON)
 
@@ -35,6 +43,7 @@ This document tracks how App IDs are handled across the codebase to ensure prope
 **Issue**: Regex extraction returned STRING appid, but `utils.get_game_name()` expects INT
 
 **Fix Applied**:
+
 ```python
 # Line 156: New format pattern
 appid, title_from_name, date, reviews_str = match.groups()
@@ -51,6 +60,7 @@ appid = int(title_or_appid) if is_appid_only else 'N/A'  # Convert to int
 #### Location: `run_json_analysis_job()` - Lines 285-311
 
 **Implementation**:
+
 ```python
 appid = review_data.get('metadata', {}).get('appid', 'N/A')
 final_title = utils.get_game_name(appid) if isinstance(appid, int) else f"AppID_{appid}"
@@ -63,6 +73,7 @@ final_title = utils.get_game_name(appid) if isinstance(appid, int) else f"AppID_
 #### Location: `load_raw_json()` and `load_extreme_results()` - Lines 92-145
 
 **Implementation**:
+
 - Both methods load JSON files that contain INT appid in metadata
 - `display_extreme_reviews()` extracts: `appid = metadata.get('appid', 'N/A')`
 - Already INTEGER from JSON deserialization
@@ -74,6 +85,7 @@ final_title = utils.get_game_name(appid) if isinstance(appid, int) else f"AppID_
 #### Location: `start_analysis_thread()` - Lines 227-267
 
 **Implementation**:
+
 ```python
 appid = int(self.appid_entry.get().strip())  # Line 234
 game_title = utils.get_game_name(appid)  # Line 237
@@ -83,13 +95,13 @@ game_title = utils.get_game_name(appid)  # Line 237
 
 ## Summary
 
-| Function | File | Status | Notes |
-|----------|------|--------|-------|
-| `import_csv_report()` | `data_collection_tab.py` | ✅ FIXED | Added `int(appid)` conversion after regex |
-| `run_json_analysis_job()` | `data_collection_tab.py` | ✅ CORRECT | JSON stores INT appid naturally |
-| `load_raw_json()` | `extreme_reviews_tab.py` | ✅ CORRECT | JSON stores INT appid naturally |
-| `load_extreme_results()` | `extreme_reviews_tab.py` | ✅ CORRECT | JSON stores INT appid naturally |
-| `start_analysis_thread()` | `data_collection_tab.py` | ✅ CORRECT | Explicit int() conversion on input |
+| Function                  | File                     | Status     | Notes                                     |
+| ------------------------- | ------------------------ | ---------- | ----------------------------------------- |
+| `import_csv_report()`     | `data_collection_tab.py` | ✅ FIXED   | Added `int(appid)` conversion after regex |
+| `run_json_analysis_job()` | `data_collection_tab.py` | ✅ CORRECT | JSON stores INT appid naturally           |
+| `load_raw_json()`         | `extreme_reviews_tab.py` | ✅ CORRECT | JSON stores INT appid naturally           |
+| `load_extreme_results()`  | `extreme_reviews_tab.py` | ✅ CORRECT | JSON stores INT appid naturally           |
+| `start_analysis_thread()` | `data_collection_tab.py` | ✅ CORRECT | Explicit int() conversion on input        |
 
 ## Best Practices
 
