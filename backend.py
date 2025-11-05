@@ -1,3 +1,8 @@
+"""
+Backend module for Steam review data fetching and analysis.
+Handles API communication with Steam and coordinates report generation.
+"""
+
 import requests
 import json
 import csv
@@ -9,16 +14,16 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 import threading
 
-# Import analyzers
 from analyzers.language_report import LanguageReportAnalyzer
 
-# --- Constants and Mappings ---
+# API and storage configuration
 BASE_URL = "https://store.steampowered.com/appreviews/"
 TEMP_FOLDER = 'data/cache'
 JSON_FOLDER = 'data/raw'
 REPORTS_FOLDER = 'data/processed/reports'
 CHECKPOINT_INTERVAL_PAGES = 50
 
+# Language code to Chinese translation mapping (for legacy compatibility)
 LANGUAGE_MAPPING = {
     'All Languages Combined': '全部语言', 'english': '英语', 'schinese': '简体中文',
     'tchinese': '繁体中文', 'japanese': '日语', 'koreana': '韩语', 'russian': '俄语',
@@ -30,6 +35,8 @@ LANGUAGE_MAPPING = {
     'bulgarian': '保加利亚语', 'greek': '希腊语', 'vietnamese': '越南语',
     'ukrainian': '乌克兰语', 'arabic': '阿拉伯语', 'unknown_language': '未知语言'
 }
+
+# Steam review category to Chinese translation mapping
 CATEGORY_MAPPING = {
     'Overwhelmingly Positive': '好评如潮', 'Very Positive': '特别好评',
     'Mostly Positive': '多半好评', 'Mixed': '褒贬不一', 'Mostly Negative': '多半差评',
@@ -37,9 +44,16 @@ CATEGORY_MAPPING = {
     'No Reviews': '暂无评测'
 }
 
-# --- Part 1: Data Fetching (Unchanged) ---
-
 def get_recent_review_summary(appid: int) -> Optional[Dict[str, int]]:
+    """
+    Fetch review summary statistics from Steam API.
+    
+    Args:
+        appid: Steam application ID
+        
+    Returns:
+        Dictionary with total, positive, and negative review counts, or None if failed
+    """
     url = f"{BASE_URL}{appid}"
     params = {'json': '1', 'language': 'all'}
     try:
@@ -64,10 +78,27 @@ def get_all_steam_reviews(
     resume: bool = False,
     **kwargs
 ) -> Optional[Dict[str, Any]]:
+    """
+    Fetch all reviews for a Steam application with checkpoint support.
+    
+    Implements pagination through Steam's cursor-based API, with automatic
+    checkpointing every 50 pages to enable resume after cancellation.
+    
+    Args:
+        appid: Steam application ID
+        status_queue: Queue for sending status updates to UI
+        cancel_event: Threading event to signal cancellation
+        resume: If True, attempt to resume from checkpoint file
+        **kwargs: Additional parameters (max_pages, delay_seconds, etc.)
+        
+    Returns:
+        Dictionary with 'metadata' and 'reviews' keys, or None if cancelled
+    """
     checkpoint_path = os.path.join(TEMP_FOLDER, f"{appid}_checkpoint.json")
     all_reviews: List[Dict[str, Any]] = []
     cursor = '*'
     
+    # Load checkpoint if resuming
     if resume and os.path.exists(checkpoint_path):
         try:
             with open(checkpoint_path, 'r', encoding='utf-8') as f:
@@ -81,6 +112,7 @@ def get_all_steam_reviews(
     elif os.path.exists(checkpoint_path):
         os.remove(checkpoint_path)
 
+    # API request parameters
     params = {
         'json': '1', 'filter': 'updated', 'language': 'all', 'review_type': 'all', 
         'purchase_type': 'all', 'num_per_page': '100', **kwargs
@@ -92,6 +124,7 @@ def get_all_steam_reviews(
 
     status_queue.put(f"Starting review collection for App ID: {appid}...")
 
+    # Pagination loop - continues until max_pages reached or no more reviews
     while not (max_pages is not None and page_count >= max_pages):
         if cancel_event.is_set():
             status_queue.put("Download cancelled by user.")
@@ -122,6 +155,7 @@ def get_all_steam_reviews(
 
             if next_cursor and next_cursor != cursor:
                 cursor = next_cursor
+                # Save checkpoint every N pages for resume capability
                 if page_count % CHECKPOINT_INTERVAL_PAGES == 0:
                     os.makedirs(TEMP_FOLDER, exist_ok=True)
                     with open(checkpoint_path, 'w', encoding='utf-8') as f:
@@ -136,15 +170,19 @@ def get_all_steam_reviews(
             status_queue.put(f"An error occurred: {e}")
             break
     
+    # Package collected data with metadata
     final_data = {
         'metadata': {
-            'appid': appid, 'total_reviews_collected': len(all_reviews),
-            'pages_fetched': page_count, 'date_collected_utc': datetime.utcnow().isoformat(),
+            'appid': appid, 
+            'total_reviews_collected': len(all_reviews),
+            'pages_fetched': page_count, 
+            'date_collected_utc': datetime.utcnow().isoformat(),
             'max_pages_requested': max_pages
         },
         'reviews': all_reviews
     }
 
+    # Handle cancellation - save checkpoint for resume
     if cancel_event.is_set():
         os.makedirs(TEMP_FOLDER, exist_ok=True)
         with open(checkpoint_path, 'w', encoding='utf-8') as f:
@@ -157,6 +195,16 @@ def get_all_steam_reviews(
     return final_data
 
 def save_reviews_to_json(data: Dict[str, Any], status_queue) -> None:
+    """
+    Save raw review data to JSON file with standardized naming.
+    
+    File naming format: {appid}_{date}_{count}_reviews.json
+    Example: 1030300_2025-11-05_2000max_reviews.json
+    
+    Args:
+        data: Dictionary containing 'metadata' and 'reviews' keys
+        status_queue: Queue for sending status updates to UI
+    """
     if not data or not data.get('reviews'):
         status_queue.put("No raw review data to save.")
         return
@@ -179,20 +227,20 @@ def save_reviews_to_json(data: Dict[str, Any], status_queue) -> None:
     except IOError as e:
         status_queue.put(f"Error saving raw JSON file: {e}")
 
-# --- Part 2: Data Analysis (Updated) ---
-
 def analyze_and_save_report(review_data: Dict[str, Any], status_queue, game_title: str = "N/A") -> Optional[List[Dict]]:
     """
-    Wrapper function for backward compatibility.
-    Uses the LanguageReportAnalyzer to generate reports.
+    Generate language-based analysis report from review data.
+    
+    This is a wrapper function that delegates to LanguageReportAnalyzer.
+    Maintains backward compatibility with existing code.
     
     Args:
-        review_data: Dictionary containing 'metadata' and 'reviews'
-        status_queue: Queue for status updates
-        game_title: Title of the game
+        review_data: Dictionary containing 'metadata' and 'reviews' keys
+        status_queue: Queue for sending status updates to UI
+        game_title: Game title for report filename generation
         
     Returns:
-        List of report row dictionaries, or None if no reviews
+        List of report row dictionaries for UI display, or None if no reviews
     """
     analyzer = LanguageReportAnalyzer(reports_folder=REPORTS_FOLDER)
     return analyzer.analyze(review_data, game_title=game_title, status_queue=status_queue)

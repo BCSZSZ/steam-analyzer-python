@@ -1,6 +1,8 @@
 """
 Language Report Analyzer - generates CSV reports grouped by language.
-This is the original analysis functionality from backend.py.
+
+Creates comprehensive CSV reports analyzing Steam reviews by language,
+including sentiment percentages, Steam review categories, and playtime metrics.
 """
 
 import csv
@@ -12,7 +14,6 @@ from typing import Dict, Any, List, Optional
 from .base_analyzer import BaseAnalyzer
 
 
-# Language and category mappings
 LANGUAGE_MAPPING = {
     'All Languages Combined': '全部语言', 'english': '英语', 'schinese': '简体中文',
     'tchinese': '繁体中文', 'japanese': '日语', 'koreana': '韩语', 'russian': '俄语',
@@ -34,27 +35,43 @@ CATEGORY_MAPPING = {
 
 
 class LanguageReportAnalyzer(BaseAnalyzer):
-    """Generates CSV reports analyzing reviews by language and sentiment."""
+    """
+    Generates CSV reports analyzing Steam reviews by language and sentiment.
+    
+    Creates comprehensive reports with:
+    - Overall statistics across all languages
+    - Per-language metrics (positive/negative counts, sentiment rates)
+    - Steam review categories (Overwhelmingly Positive, Mixed, etc.)
+    - Average playtime statistics for positive and negative reviews
+    """
     
     def __init__(self, reports_folder: str = 'data/processed/reports'):
         """
         Initialize the language report analyzer.
         
         Args:
-            reports_folder: Folder to save CSV reports
+            reports_folder: Directory to save generated CSV reports
         """
         super().__init__()
         self.reports_folder = reports_folder
     
     def categorize_score(self, positive_rate: float) -> str:
         """
-        Assigns a Steam-like review category based on the positive review percentage.
+        Determine Steam review category from positive review percentage.
+        
+        Uses Steam's official thresholds:
+        - ≥95%: Overwhelmingly Positive
+        - ≥80%: Very Positive
+        - ≥70%: Mostly Positive
+        - ≥40%: Mixed
+        - ≥20%: Mostly Negative
+        - <20%: Very Negative
         
         Args:
-            positive_rate: The percentage of positive reviews (0.0 to 100.0)
+            positive_rate: Percentage of positive reviews (0.0 to 100.0)
             
         Returns:
-            The corresponding review category string
+            Steam review category string
         """
         if positive_rate >= 95.0:
             return "Overwhelmingly Positive"
@@ -70,13 +87,20 @@ class LanguageReportAnalyzer(BaseAnalyzer):
     
     def calculate_review_metrics(self, reviews: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        Calculates metrics for a list of reviews.
+        Calculate comprehensive metrics for a set of reviews.
+        
+        Computes:
+        - Review counts (total, positive, negative)
+        - Positive rate percentage and Steam category
+        - Average games owned (positive vs negative reviewers)
+        - Average playtime at review time (positive vs negative)
+        - Average total playtime (positive vs negative)
         
         Args:
-            reviews: List of review dictionaries
+            reviews: List of review dictionaries from Steam API
             
         Returns:
-            Dictionary containing total, positive count, rate, category, and averages
+            Dictionary with all calculated metrics
         """
         total_reviews = len(reviews)
         if total_reviews == 0:
@@ -86,6 +110,7 @@ class LanguageReportAnalyzer(BaseAnalyzer):
                 'avg_playtime_review_neg': 0, 'avg_playtime_forever_pos': 0, 'avg_playtime_forever_neg': 0
             }
 
+        # Partition reviews by sentiment
         pos_reviews = [r for r in reviews if r.get('voted_up')]
         neg_reviews = [r for r in reviews if not r.get('voted_up')]
 
@@ -95,7 +120,7 @@ class LanguageReportAnalyzer(BaseAnalyzer):
         rate = (pos_count / total_reviews) * 100 if total_reviews > 0 else 0
         category = self.categorize_score(rate)
 
-        # Calculate averages for positive reviews
+        # Calculate average metrics for positive reviews
         if pos_count > 0:
             avg_games_pos = sum(r['author'].get('num_games_owned', 0) for r in pos_reviews) / pos_count
             avg_playtime_review_pos = (sum(r['author'].get('playtime_at_review', 0) for r in pos_reviews) / pos_count) / 60
@@ -103,7 +128,7 @@ class LanguageReportAnalyzer(BaseAnalyzer):
         else:
             avg_games_pos, avg_playtime_review_pos, avg_playtime_forever_pos = 0, 0, 0
 
-        # Calculate averages for negative reviews
+        # Calculate average metrics for negative reviews
         if neg_count > 0:
             avg_games_neg = sum(r['author'].get('num_games_owned', 0) for r in neg_reviews) / neg_count
             avg_playtime_review_neg = (sum(r['author'].get('playtime_at_review', 0) for r in neg_reviews) / neg_count) / 60
@@ -137,16 +162,16 @@ class LanguageReportAnalyzer(BaseAnalyzer):
                 status_queue.put("No reviews found for analysis.")
             return None
 
-        # Group reviews by language
+        # Group reviews by language code
         reviews_by_language = {}
         for review in all_reviews:
             lang = review.get('language', 'unknown_language')
             reviews_by_language.setdefault(lang, []).append(review)
 
-        # Build report rows
+        # Build CSV report rows
         report_rows = []
         
-        # Overall metrics
+        # First row: aggregate metrics across all languages
         overall_metrics = self.calculate_review_metrics(all_reviews)
         report_rows.append({
             'Language': 'All Languages Combined',
@@ -164,7 +189,7 @@ class LanguageReportAnalyzer(BaseAnalyzer):
             'Avg Playtime Total (Neg, hrs)': f"{overall_metrics['avg_playtime_forever_neg']:.1f}"
         })
 
-        # Per-language metrics
+        # Subsequent rows: per-language breakdown (sorted alphabetically)
         for lang_code, reviews in sorted(reviews_by_language.items()):
             lang_metrics = self.calculate_review_metrics(reviews)
             report_rows.append({
@@ -183,11 +208,11 @@ class LanguageReportAnalyzer(BaseAnalyzer):
                 'Avg Playtime Total (Neg, hrs)': f"{lang_metrics['avg_playtime_forever_neg']:.1f}"
             })
         
-        # Save to CSV
+        # Generate CSV file with standardized naming
         metadata = self.get_metadata(json_data)
         appid = metadata['appid']
         
-        # Sanitize title for filename
+        # Sanitize game title for use in filename (remove special characters)
         sanitized_title = ""
         if game_title and game_title != "N/A" and not game_title.startswith("AppID_"):
             sanitized_title = re.sub(r'[^\w\-\.]', '_', game_title)
@@ -196,6 +221,7 @@ class LanguageReportAnalyzer(BaseAnalyzer):
         today_str = datetime.utcnow().strftime('%Y-%m-%d')
         count_str = "all" if metadata.get('max_pages_requested') is None else f"{total_reviews}max"
 
+        # File naming format: {appid}_{sanitized_title}_{date}_{count}_report.csv
         report_filename = f"{appid}_{sanitized_title}_{today_str}_{count_str}_report.csv"
         
         os.makedirs(self.reports_folder, exist_ok=True)

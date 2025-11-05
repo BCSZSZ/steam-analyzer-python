@@ -14,6 +14,7 @@ import re
 import json
 
 import backend
+import utils
 from .base_tab import BaseTab
 
 
@@ -24,20 +25,15 @@ class DataCollectionTab(BaseTab):
         return "Data Collection"
     
     def create_ui(self):
-        """Create all UI elements for data collection."""
-        # --- Input Frame ---
+        """Create all UI elements for data collection tab."""
+        # Input controls for fetching reviews
         input_frame = ttk.Frame(self.frame, padding="10")
         input_frame.pack(fill=tk.X)
 
         ttk.Label(input_frame, text="App ID:").pack(side=tk.LEFT, padx=5)
         self.appid_entry = ttk.Entry(input_frame, width=10)
         self.appid_entry.pack(side=tk.LEFT, padx=5)
-        self.appid_entry.insert(0, "1022980") # Silksong
-
-        ttk.Label(input_frame, text="Game Title:").pack(side=tk.LEFT, padx=(10, 5))
-        self.title_entry = ttk.Entry(input_frame, width=20)
-        self.title_entry.pack(side=tk.LEFT, padx=5)
-        self.title_entry.insert(0, "Hollow Knight: Silksong")
+        self.appid_entry.insert(0, "1022980")
 
         self.fetch_all_checkbox = ttk.Checkbutton(
             input_frame, text="Fetch all available reviews", 
@@ -61,7 +57,7 @@ class DataCollectionTab(BaseTab):
         self.cancel_button = ttk.Button(input_frame, text="Cancel", command=self.cancel_download, state=tk.DISABLED)
         self.cancel_button.pack(side=tk.LEFT, padx=5)
 
-        # --- Information Display Frame ---
+        # Information display showing current dataset metadata
         info_frame = ttk.LabelFrame(self.frame, text="Current Data Information", padding="10")
         info_frame.pack(fill=tk.X, padx=10, pady=5)
         
@@ -75,7 +71,7 @@ class DataCollectionTab(BaseTab):
         ttk.Label(info_frame, textvariable=self.info_total_reviews).pack(side=tk.LEFT, padx=20)
         ttk.Label(info_frame, textvariable=self.info_date).pack(side=tk.LEFT, padx=20)
 
-        # --- Report Table Frame ---
+        # Report table showing analysis results grouped by language
         table_frame = ttk.Frame(self.frame, padding="10")
         table_frame.pack(fill=tk.BOTH, expand=True)
 
@@ -111,21 +107,29 @@ class DataCollectionTab(BaseTab):
         self.tree.configure(yscroll=scrollbar.set)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # --- Status Log Frame ---
+        # Status label for operation feedback
         log_frame = ttk.Frame(self.frame, padding="10")
         log_frame.pack(fill=tk.X)
         self.status_label = ttk.Label(log_frame, text="Ready.", anchor=tk.W)
         self.status_label.pack(fill=tk.X)
 
     def cancel_download(self):
+        """Signal cancellation of ongoing download operation."""
         self.status_label.config(text="Cancelling... please wait for the current request to finish.")
         self.app.cancel_event.set()
         self.cancel_button.config(state=tk.DISABLED)
 
     def toggle_max_reviews_entry(self):
+        """Enable/disable review count entry based on 'fetch all' checkbox."""
         self.reviews_entry.config(state=tk.DISABLED if self.app.fetch_all_var.get() else tk.NORMAL)
 
     def import_csv_report(self):
+        """
+        Load and display a previously generated CSV report.
+        
+        Parses filename to extract app ID and metadata, then fetches game name
+        from cache or Steam API. Populates the report table with imported data.
+        """
         filepath = filedialog.askopenfilename(
             title="Select a CSV Report File", filetypes=[("CSV Files", "*.csv")], initialdir="./data/processed/reports"
         )
@@ -153,12 +157,12 @@ class DataCollectionTab(BaseTab):
                 self.tree.insert('', tk.END, values=values)
 
             filename = os.path.basename(filepath)
-            # New regex to handle "appid_title_date_count" format
+            # Parse filename: {appid}_{title}_{date}_{count}_report.csv
             match = re.match(r"(\d+)_(.*)_(\d{4}-\d{2}-\d{2})_(\w+)_report\.csv", filename)
             
             if match:
                 appid, title_from_name, date, reviews_str = match.groups()
-                # Replace underscores back to spaces for display
+                appid = int(appid)  # Convert string to integer for utils.get_game_name()
                 title = title_from_name.replace('_', ' ')
                 reviews = reviews_str.replace('max', '') if 'max' in reviews_str else 'all'
                 
@@ -169,15 +173,14 @@ class DataCollectionTab(BaseTab):
                     'date_collected_utc': date
                 })
             else:
-                # Fallback for old filename format (just title/appid, no prefix)
+                # Fallback for legacy filename format
                 match_old = re.match(r"(.+)_(\d{4}-\d{2}-\d{2})_(\w+)_report\.csv", filename)
                 if match_old:
                     title_or_appid, date, reviews_str = match_old.groups()
                     reviews = reviews_str.replace('max', '') if 'max' in reviews_str else 'all'
-                    # Heuristic to guess if it's an appid or title
                     is_appid_only = all(c.isdigit() for c in title_or_appid)
                     
-                    appid = title_or_appid if is_appid_only else 'N/A'
+                    appid = int(title_or_appid) if is_appid_only else 'N/A'
                     title = '' if is_appid_only else title_or_appid.replace('_', ' ')
 
                     self.update_info_display({
@@ -185,15 +188,24 @@ class DataCollectionTab(BaseTab):
                         'total_reviews_collected': reviews, 'date_collected_utc': date
                     })
                 else:
-                    self.update_info_display({}) # Clear if format is unknown
+                    self.update_info_display({})
 
             self.status_label.config(text=f"Successfully imported report: {filename}")
         except Exception as e:
             messagebox.showerror("Import Error", f"Failed to read CSV.\n\nError: {e}")
             
     def update_info_display(self, metadata):
-        game_title = metadata.get('game_title', 'N/A')
+        """
+        Update the information panel with dataset metadata.
+        
+        Automatically fetches game name from cache or Steam API if app ID is available.
+        Falls back to metadata-provided title for legacy data.
+        
+        Args:
+            metadata: Dictionary with 'appid', 'game_title', 'total_reviews_collected', etc.
+        """
         appid = metadata.get('appid', 'N/A')
+        game_title = utils.get_game_name(appid) if isinstance(appid, int) else metadata.get('game_title', 'N/A')
         total_reviews = metadata.get('total_reviews_collected', 'N/A')
         date_str = metadata.get('date_collected_utc', 'N/A')
         if isinstance(date_str, str): date_str = date_str[:10]
@@ -203,6 +215,15 @@ class DataCollectionTab(BaseTab):
         self.info_date.set(f"Fetched Date: {date_str}")
 
     def sort_column(self, col, numeric_cols):
+        """
+        Sort table by clicked column header.
+        
+        Handles both numeric and text columns. Toggles sort direction on repeated clicks.
+        
+        Args:
+            col: Column identifier to sort by
+            numeric_cols: List of column identifiers that should be sorted numerically
+        """
         if col == self.app.sort_by: self.app.sort_reverse = not self.app.sort_reverse
         else: self.app.sort_by, self.app.sort_reverse = col, False
         
@@ -222,12 +243,15 @@ class DataCollectionTab(BaseTab):
         for index, (_, item_id) in enumerate(data): self.tree.move(item_id, '', index)
 
     def start_analysis_thread(self):
+        """
+        Initiate review fetching and analysis in a background thread.
+        
+        Validates input, checks for resume capability, and spawns a worker thread
+        to avoid blocking the UI during long-running operations.
+        """
         try:
             appid = int(self.appid_entry.get())
-            game_title = self.title_entry.get().strip()
-            if not game_title:
-                messagebox.showwarning("Input Needed", "Please enter a Game Title.")
-                return
+            game_title = utils.get_game_name(appid)
 
             if self.app.fetch_all_var.get():
                 max_pages = None
@@ -238,6 +262,7 @@ class DataCollectionTab(BaseTab):
             messagebox.showerror("Invalid Input", "Please enter a valid number for App ID.")
             return
         
+        # Check for checkpoint file to enable resume
         self.app.cancel_event.clear()
         resume = False
         checkpoint_path = os.path.join(backend.TEMP_FOLDER, f"{appid}_checkpoint.json")
@@ -255,6 +280,18 @@ class DataCollectionTab(BaseTab):
         thread.start()
 
     def run_backend_job(self, appid, max_pages, resume, game_title):
+        """
+        Background worker that fetches reviews and generates reports.
+        
+        Orchestrates the full pipeline: fetch → save JSON → analyze → save CSV.
+        Sends results back to UI via status queue.
+        
+        Args:
+            appid: Steam application ID
+            max_pages: Maximum pages to fetch (None = all)
+            resume: Whether to resume from checkpoint
+            game_title: Game name for report generation
+        """
         scraped_data = backend.get_all_steam_reviews(
             appid, status_queue=self.app.status_queue, max_pages=max_pages, 
             cancel_event=self.app.cancel_event, resume=resume
@@ -270,6 +307,11 @@ class DataCollectionTab(BaseTab):
         self.app.status_queue.put({'type': 'done'})
 
     def start_json_analysis_thread(self):
+        """
+        Analyze a previously saved raw JSON file.
+        
+        Loads raw review data and generates a new CSV report without re-fetching from Steam.
+        """
         filepath = filedialog.askopenfilename(
             title="Select a Raw Review JSON File",
             filetypes=[("JSON Files", "*.json")],
@@ -277,18 +319,25 @@ class DataCollectionTab(BaseTab):
         )
         if not filepath:
             return
-
-        game_title = self.title_entry.get().strip()
         
         self.fetch_button.config(state=tk.DISABLED)
         self.import_button.config(state=tk.DISABLED)
         self.analyze_json_button.config(state=tk.DISABLED)
         self.tree.delete(*self.tree.get_children())
         
-        thread = threading.Thread(target=self.run_json_analysis_job, args=(filepath, game_title), daemon=True)
+        thread = threading.Thread(target=self.run_json_analysis_job, args=(filepath,), daemon=True)
         thread.start()
 
-    def run_json_analysis_job(self, filepath, game_title):
+    def run_json_analysis_job(self, filepath):
+        """
+        Background worker for analyzing existing JSON files.
+        
+        Reads raw review data, fetches game name, generates CSV report,
+        and updates UI with results.
+        
+        Args:
+            filepath: Path to the raw review JSON file
+        """
         try:
             self.app.status_queue.put(f"Loading and analyzing {os.path.basename(filepath)}...")
             with open(filepath, 'r', encoding='utf-8') as f:
@@ -296,7 +345,7 @@ class DataCollectionTab(BaseTab):
 
             if review_data and review_data.get('reviews'):
                 appid = review_data.get('metadata', {}).get('appid', 'N/A')
-                final_title = game_title if game_title else f"AppID_{appid}"
+                final_title = utils.get_game_name(appid) if isinstance(appid, int) else f"AppID_{appid}"
 
                 if 'metadata' not in review_data: review_data['metadata'] = {}
                 review_data['metadata']['game_title'] = final_title
@@ -317,7 +366,12 @@ class DataCollectionTab(BaseTab):
             self.app.status_queue.put({'type': 'done'})
     
     def populate_table(self, report_data):
-        """Populate the table with report data."""
+        """
+        Display report data in the table view.
+        
+        Args:
+            report_data: List of dictionaries, each representing a row in the report
+        """
         self.tree.delete(*self.tree.get_children())
         for row_dict in report_data:
             values = list(row_dict.values())
