@@ -3,3 +3,6 @@ requests
 jieba
 nltk
 scikit-learn
+wordcloud
+pillow
+matplotlib

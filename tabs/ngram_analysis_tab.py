@@ -10,9 +10,11 @@ from tkinter import ttk, messagebox, filedialog
 import json
 import csv
 import threading
+from PIL import Image, ImageTk
 
 from .base_tab import BaseTab
 from analyzers.ngram_analyzer import NgramAnalyzer
+from analyzers.wordcloud_generator import WordCloudGenerator
 from memory_utils import clear_tab_data
 
 
@@ -100,11 +102,11 @@ class NgramAnalysisTab(BaseTab):
         
         # Results display area
         results_frame = ttk.LabelFrame(self.frame, text="Analysis Results", padding="10")
-        results_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        results_frame.pack(fill=tk.BOTH, expand=False, padx=10, pady=5)
         
         # Results table
         columns = ('rank', 'ngram', 'count', 'percentage')
-        self.results_tree = ttk.Treeview(results_frame, columns=columns, show='headings', height=15)
+        self.results_tree = ttk.Treeview(results_frame, columns=columns, show='headings', height=12)
         
         self.results_tree.heading('rank', text='Rank')
         self.results_tree.heading('ngram', text='N-gram')
@@ -127,6 +129,138 @@ class NgramAnalysisTab(BaseTab):
         
         # Store current results for export
         self.current_results = None
+        
+        # Word Cloud Section (Always visible)
+        self.wordcloud_generator = WordCloudGenerator()
+        self.wordcloud_image = None
+        
+        # Word cloud frame
+        wordcloud_frame = ttk.LabelFrame(self.frame, text="Word Cloud Visualization", padding="10")
+        wordcloud_frame.pack(fill=tk.BOTH, expand=False, padx=10, pady=5)
+        
+        # Button to generate
+        btn_frame = ttk.Frame(wordcloud_frame)
+        btn_frame.pack(pady=5)
+        
+        self.generate_wordcloud_btn = ttk.Button(
+            btn_frame, 
+            text="Generate Word Cloud", 
+            command=self.generate_wordcloud,
+            state=tk.DISABLED
+        )
+        self.generate_wordcloud_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Word cloud display
+        self.wordcloud_label = ttk.Label(wordcloud_frame, text="Load data and analyze to generate word cloud (opens in popup with save button)")
+        self.wordcloud_label.pack(pady=10)
+    
+    def generate_wordcloud(self):
+        """Generate and display word cloud in popup window."""
+        if not self.current_results:
+            messagebox.showwarning("No Data", "Please run analysis first.")
+            return
+        
+        try:
+            top_ngrams = self.current_results.get('top_ngrams', [])
+            if not top_ngrams:
+                messagebox.showwarning("No Data", "No n-grams available for word cloud")
+                return
+            
+            # Get language from current results
+            params = self.current_results.get('analysis_params', {})
+            language = params.get('language', 'english')
+            
+            # Show generating message
+            self.wordcloud_label.config(text="Generating word cloud...")
+            self.frame.update()
+            
+            # Generate word cloud with language parameter
+            image = self.wordcloud_generator.generate_from_ngrams(
+                top_ngrams,
+                max_words=100,
+                colormap='viridis',
+                language=language
+            )
+            
+            if image:
+                # Store image for saving
+                self.wordcloud_image = image
+                
+                # Show in popup window
+                self._show_wordcloud_popup(image, "N-gram Word Cloud")
+                
+                # Update label
+                self.wordcloud_label.config(text="Word cloud generated! (Shown in popup window with save button)")
+            else:
+                self.wordcloud_label.config(text="Failed to generate word cloud")
+        
+        except Exception as e:
+            self.wordcloud_label.config(text=f"Error: {str(e)}")
+            messagebox.showerror("Error", f"Failed to generate word cloud:\n{str(e)}")
+    
+    def _show_wordcloud_popup(self, image, title):
+        """Show word cloud in a popup window with save functionality."""
+        popup = tk.Toplevel(self.frame)
+        popup.title(title)
+        popup.geometry("1250x700")
+        
+        # Button frame at top
+        btn_frame = ttk.Frame(popup)
+        btn_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=10)
+        
+        ttk.Label(btn_frame, text=title, font=('Arial', 12, 'bold')).pack(side=tk.LEFT)
+        
+        save_btn = ttk.Button(
+            btn_frame, 
+            text="Save Image", 
+            command=lambda: self._save_popup_image(image)
+        )
+        save_btn.pack(side=tk.RIGHT, padx=5)
+        
+        ttk.Label(btn_frame, text="(Right-click image to save)", foreground='gray').pack(side=tk.RIGHT, padx=10)
+        
+        # Create canvas with scrollbars
+        canvas = tk.Canvas(popup)
+        v_scrollbar = ttk.Scrollbar(popup, orient=tk.VERTICAL, command=canvas.yview)
+        h_scrollbar = ttk.Scrollbar(popup, orient=tk.HORIZONTAL, command=canvas.xview)
+        
+        canvas.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+        
+        v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Convert to PhotoImage and display
+        photo = ImageTk.PhotoImage(image)
+        canvas.create_image(0, 0, anchor=tk.NW, image=photo)
+        canvas.image = photo  # Keep reference
+        
+        # Right-click to save
+        canvas.bind("<Button-3>", lambda e: self._save_popup_image(image))
+        
+        # Update scroll region
+        canvas.configure(scrollregion=canvas.bbox("all"))
+    
+    def _save_popup_image(self, image):
+        """Save word cloud image from popup."""
+        filepath = filedialog.asksaveasfilename(
+            title="Save Word Cloud Image",
+            defaultextension=".png",
+            filetypes=[("PNG Image", "*.png"), ("All Files", "*.*")],
+            initialdir="./data/processed"
+        )
+        
+        if filepath:
+            try:
+                success = self.wordcloud_generator.save_image(image, filepath)
+                if success:
+                    messagebox.showinfo("Success", f"Word cloud saved to:\n{filepath}")
+                else:
+                    messagebox.showerror("Error", "Failed to save word cloud image.")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to save image:\n{e}")
+    
+
     
     def load_raw_json(self):
         """Load raw review JSON file for analysis."""
@@ -370,3 +504,6 @@ class NgramAnalysisTab(BaseTab):
                 f"{item['count']:,}",
                 f"{item['percentage']}%"
             ))
+        
+        # Enable word cloud generation button
+        self.generate_wordcloud_btn.config(state=tk.NORMAL)

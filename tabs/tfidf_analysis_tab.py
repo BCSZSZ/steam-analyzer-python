@@ -10,9 +10,11 @@ from tkinter import ttk, messagebox, filedialog
 import json
 import csv
 import threading
+from PIL import Image, ImageTk
 
 from .base_tab import BaseTab
 from analyzers.tfidf_analyzer import TfidfAnalyzer
+from analyzers.wordcloud_generator import WordCloudGenerator
 from memory_utils import clear_tab_data
 
 
@@ -88,14 +90,14 @@ class TfidfAnalysisTab(BaseTab):
         
         # Results display area - side by side comparison
         results_container = ttk.Frame(self.frame, padding="10")
-        results_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        results_container.pack(fill=tk.BOTH, expand=False, padx=10, pady=5)
         
         # Left panel: Positive distinctive terms
         positive_frame = ttk.LabelFrame(results_container, text="Positive Distinctive Terms", padding="10")
         positive_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
         
         columns_pos = ('rank', 'term', 'score')
-        self.positive_tree = ttk.Treeview(positive_frame, columns=columns_pos, show='headings', height=20)
+        self.positive_tree = ttk.Treeview(positive_frame, columns=columns_pos, show='headings', height=12)
         
         self.positive_tree.heading('rank', text='Rank')
         self.positive_tree.heading('term', text='Term')
@@ -116,7 +118,7 @@ class TfidfAnalysisTab(BaseTab):
         negative_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 0))
         
         columns_neg = ('rank', 'term', 'score')
-        self.negative_tree = ttk.Treeview(negative_frame, columns=columns_neg, show='headings', height=20)
+        self.negative_tree = ttk.Treeview(negative_frame, columns=columns_neg, show='headings', height=12)
         
         self.negative_tree.heading('rank', text='Rank')
         self.negative_tree.heading('term', text='Term')
@@ -138,6 +140,144 @@ class TfidfAnalysisTab(BaseTab):
         
         # Store current results for export
         self.current_results = None
+        
+        # Word Cloud Section (Always visible)
+        self.wordcloud_generator = WordCloudGenerator()
+        self.positive_wordcloud_image = None
+        self.negative_wordcloud_image = None
+        
+        # Word cloud frame
+        wordcloud_frame = ttk.LabelFrame(self.frame, text="Word Cloud Visualization", padding="10")
+        wordcloud_frame.pack(fill=tk.BOTH, expand=False, padx=10, pady=5)
+        
+        # Generate button
+        btn_frame = ttk.Frame(wordcloud_frame)
+        btn_frame.pack(pady=5)
+        
+        self.generate_wordclouds_btn = ttk.Button(
+            btn_frame, 
+            text="Generate Word Clouds", 
+            command=self.generate_wordclouds,
+            state=tk.DISABLED
+        )
+        self.generate_wordclouds_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Status label
+        self.wordcloud_status_label = ttk.Label(
+            wordcloud_frame, 
+            text="Load data and analyze to generate word clouds (opens in popups with save buttons)"
+        )
+        self.wordcloud_status_label.pack(pady=10)
+    
+    def generate_wordclouds(self):
+        """Generate and display dual word clouds in popup windows."""
+        if not self.current_results:
+            messagebox.showwarning("No Data", "Please run analysis first.")
+            return
+        
+        try:
+            positive_terms = self.current_results.get('positive_distinctive_terms', [])
+            negative_terms = self.current_results.get('negative_distinctive_terms', [])
+            
+            if not positive_terms and not negative_terms:
+                messagebox.showwarning("No Data", "No terms available for word cloud")
+                return
+            
+            # Get language from current results
+            params = self.current_results.get('analysis_params', {})
+            language = params.get('language', 'english')
+            
+            # Show generating message
+            self.wordcloud_status_label.config(text="Generating word clouds...")
+            self.frame.update()
+            
+            # Generate both word clouds with language parameter
+            pos_image, neg_image = self.wordcloud_generator.generate_dual_tfidf(
+                positive_terms,
+                negative_terms,
+                max_words=50,
+                language=language
+            )
+            
+            # Store images and show in popups
+            if pos_image:
+                self.positive_wordcloud_image = pos_image
+                self._show_wordcloud_popup(pos_image, "Positive Distinctive Terms", 'positive')
+            
+            if neg_image:
+                self.negative_wordcloud_image = neg_image
+                self._show_wordcloud_popup(neg_image, "Negative Distinctive Terms", 'negative')
+            
+            if pos_image or neg_image:
+                self.wordcloud_status_label.config(text="Word clouds generated! (Shown in popups with save buttons)")
+            else:
+                self.wordcloud_status_label.config(text="No terms available for word clouds")
+        
+        except Exception as e:
+            self.wordcloud_status_label.config(text=f"Error: {str(e)}")
+            messagebox.showerror("Error", f"Failed to generate word clouds:\n{str(e)}")
+    
+    def _show_wordcloud_popup(self, image, title, sentiment):
+        """Show word cloud in a popup window with save functionality."""
+        popup = tk.Toplevel(self.frame)
+        popup.title(title)
+        popup.geometry("650x700")
+        
+        # Button frame at top
+        btn_frame = ttk.Frame(popup)
+        btn_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=10)
+        
+        ttk.Label(btn_frame, text=title, font=('Arial', 12, 'bold')).pack(side=tk.LEFT)
+        
+        save_btn = ttk.Button(
+            btn_frame, 
+            text="Save Image", 
+            command=lambda: self._save_popup_image(image, sentiment)
+        )
+        save_btn.pack(side=tk.RIGHT, padx=5)
+        
+        ttk.Label(btn_frame, text="(Right-click image to save)", foreground='gray').pack(side=tk.RIGHT, padx=10)
+        
+        # Create canvas with scrollbars
+        canvas = tk.Canvas(popup)
+        v_scrollbar = ttk.Scrollbar(popup, orient=tk.VERTICAL, command=canvas.yview)
+        h_scrollbar = ttk.Scrollbar(popup, orient=tk.HORIZONTAL, command=canvas.xview)
+        
+        canvas.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+        
+        v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Convert to PhotoImage and display
+        photo = ImageTk.PhotoImage(image)
+        canvas.create_image(0, 0, anchor=tk.NW, image=photo)
+        canvas.image = photo  # Keep reference
+        
+        # Right-click to save
+        canvas.bind("<Button-3>", lambda e: self._save_popup_image(image, sentiment))
+        
+        # Update scroll region
+        canvas.configure(scrollregion=canvas.bbox("all"))
+    
+    def _save_popup_image(self, image, sentiment):
+        """Save word cloud image from popup."""
+        filepath = filedialog.asksaveasfilename(
+            title=f"Save {sentiment.capitalize()} Word Cloud",
+            defaultextension=".png",
+            filetypes=[("PNG Image", "*.png"), ("All Files", "*.*")],
+            initialdir="./data/processed"
+        )
+        
+        if filepath:
+            try:
+                success = self.wordcloud_generator.save_image(image, filepath)
+                if success:
+                    messagebox.showinfo("Success", f"Word cloud saved to:\n{filepath}")
+                else:
+                    messagebox.showerror("Error", "Failed to save word cloud image.")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to save image:\n{e}")
     
     def load_raw_json(self):
         """Load raw review JSON file for analysis."""
@@ -406,3 +546,6 @@ class TfidfAnalysisTab(BaseTab):
                 item['term'],
                 f"{item['score']:.4f}"
             ))
+        
+        # Enable word cloud generation button
+        self.generate_wordclouds_btn.config(state=tk.NORMAL)

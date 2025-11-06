@@ -2,32 +2,35 @@
 
 ## Project Overview
 
-This project is a Python GUI application for fetching and analyzing Steam user reviews by language and sentiment. It features a Tkinter-based tabbed interface with advanced text analysis capabilities including N-gram frequency analysis and TF-IDF term importance comparison. Data flows from Steam API → raw JSON storage → multiple analysis pipelines → CSV/JSON outputs.
+Python GUI application for fetching and analyzing Steam user reviews with advanced text analysis. Features N-gram frequency analysis, TF-IDF distinctive term extraction, and word cloud visualization with multi-language support (English/Chinese). Data flows: Steam API → raw JSON → analysis pipelines → CSV/JSON outputs + visualizations.
 
 ## Architecture & Data Flow
 
-- **main.py**: Entry point that creates the tabbed GUI. Manages status queue and initializes 5 tabs (Data Collection, Extreme Reviews, Text Insights, N-gram Analysis, TF-IDF Analysis).
-- **tabs/**: Modular tab implementations (all inherit from `BaseTab`)
-  - `base_tab.py`: Abstract base class defining tab interface
-  - `data_collection_tab.py`: Fetch reviews from Steam API with checkpointing
-  - `extreme_reviews_tab.py`: Display extreme playtime reviews with per-language filtering
-  - `text_insights_tab.py`: Dashboard combining N-gram and TF-IDF quick views (UI ready, backend TODO)
-  - `ngram_analysis_tab.py`: N-gram frequency analysis with language/sentiment filtering
-  - `tfidf_analysis_tab.py`: TF-IDF distinctive term comparison (positive vs negative)
-- **analyzers/**: Plugin-based analysis modules (all inherit from `BaseAnalyzer`)
-  - `base_analyzer.py`: Abstract base class with common save/load functionality
-  - `text_processor.py`: Shared NLP utilities (tokenization, stopwords, n-gram generation)
-  - `language_report.py`: CSV report generation with language/category mapping
-  - `playtime_extremes.py`: Single-pass O(n) extreme playtime finder with language grouping
-  - `ngram_analyzer.py`: N-gram frequency extraction with repetitive filtering
-  - `tfidf_analyzer.py`: TF-IDF vectorization using scikit-learn for sentiment comparison
-- **backend.py**: Fetches reviews from Steam API, manages checkpoints, saves raw data to `data/raw/`.
-- **utils.py**: Game name caching with Steam Store API (cache-first pattern).
-- **Data directories**:
-  - `data/raw/`: Raw review JSON files (named: `{appid}_{date}_{count}_reviews.json`)
-  - `data/processed/reports/`: CSV analysis reports from language_report analyzer
-  - `data/processed/insights/`: JSON analysis results (extreme reviews, n-grams, TF-IDF)
-  - `data/cache/`: Checkpointing for resume functionality + app_details cache
+### Core Components
+- **main.py**: Entry point, creates tabbed GUI with status queue. 5 tabs: Data Collection, Extreme Reviews, Text Insights, N-gram Analysis, TF-IDF Analysis.
+- **backend.py**: Steam API fetching, checkpointing (every 50 pages), saves to `data/raw/`.
+- **utils.py**: Game name caching (Steam Store API, cache-first pattern).
+
+### Tabs (inherit from BaseTab)
+- `data_collection_tab.py`: Fetch reviews, generate language reports
+- `extreme_reviews_tab.py`: Display extreme playtime reviews with language filtering
+- `text_insights_tab.py`: Dashboard with N-gram + TF-IDF quick views (frozen, kept as-is)
+- `ngram_analysis_tab.py`: N-gram frequency analysis (bigrams/trigrams) with word clouds
+- `tfidf_analysis_tab.py`: TF-IDF distinctive terms (positive vs negative) with dual word clouds
+
+### Analyzers (inherit from BaseAnalyzer)
+- `language_report.py`: CSV reports by language with sentiment stats
+- `playtime_extremes.py`: Single-pass O(n) extreme finder with language grouping
+- `text_processor.py`: Tokenization, stopwords, n-gram generation (English: NLTK, Chinese: Jieba)
+- `ngram_analyzer.py`: Frequency extraction, repetitive filtering
+- `tfidf_analyzer.py`: scikit-learn TF-IDF vectorization for sentiment comparison
+- `wordcloud_generator.py`: Word cloud images with Chinese font detection
+
+### Data Structure
+- `data/raw/`: Raw JSON (`{appid}_{date}_{count}_reviews.json`)
+- `data/processed/reports/`: CSV language reports
+- `data/processed/insights/`: JSON analysis results (extreme, n-grams, TF-IDF)
+- `data/cache/`: Checkpoints + app_details cache
 
 ## Developer Workflows
 
@@ -36,21 +39,22 @@ This project is a Python GUI application for fetching and analyzing Steam user r
 - **Debug**: Backend logic can be tested by running functions in `backend.py` directly. For UI debugging, use the GUI and observe status messages.
 - **Data Import/Export**: The GUI supports importing CSV reports and analyzing from existing JSON files.
 
-## Conventions & Patterns
+## Key Conventions
 
-- **Threading**: Long-running operations use threads with `daemon=True` to keep UI responsive. Analysis tabs use background threads.
-- **Status Updates**: UI updates are communicated via `status_queue` or `frame.after()` for thread-safe GUI updates.
-- **Language Support**: Full English/Chinese (schinese) support with language-specific tokenization:
-  - English: NLTK-style tokenization with common stopwords
-  - Chinese: Jieba segmentation with Chinese stopwords
-- **File Naming**: JSON and CSV files include `{appid}_{game_name}_{language}_{sentiment}_{type}_{date}` for traceability.
-- **Checkpointing**: Large fetches save progress in `data/cache/` every 50 pages to allow resuming.
-- **Plugin Architecture**: Analyzers inherit from `BaseAnalyzer`, tabs inherit from `BaseTab` for extensibility.
-- **Single-Pass Algorithms**: Use O(n) complexity for data processing where possible.
-- **Separation of Concerns**: Analyzers process all data and save to JSON, UI loads and displays results.
-- **N-gram Filtering**: Repetitive n-grams (e.g., ('难评', '难评')) are filtered out during generation.
-- **TF-IDF Corpus Building**: Reviews are tokenized and space-separated before TF-IDF vectorization.
-- **Game Name Caching**: `utils.get_game_name(appid)` uses cache-first pattern to minimize API calls.
+- **Threading**: Daemon threads for long operations, `status_queue`/`frame.after()` for thread-safe UI updates
+- **Language Support**: English (NLTK) and Chinese (Jieba) with language-specific tokenization/stopwords
+- **File Naming**: `{appid}_{game_name}_{language}_{sentiment}_{type}_{date}` for traceability
+- **Checkpointing**: Every 50 pages during fetch, stored in `data/cache/`
+- **Plugin Architecture**: Tabs inherit from `BaseTab`, analyzers from `BaseAnalyzer`
+- **Single-Pass Algorithms**: O(n) complexity where possible
+- **N-gram Filtering**: Only bigrams/trigrams (unigrams excluded), repetitive patterns filtered
+- **TF-IDF Vectorization**: Tokenized reviews space-separated before scikit-learn processing
+- **Word Cloud Settings**: 
+  - `prefer_horizontal=1.0` (no vertical text)
+  - `relative_scaling=0.3` (balanced sizes)
+  - `min_font_size=12`, `max_font_size=80`
+  - Chinese font auto-detection (Windows: SimHei/YaHei, macOS: PingFang, Linux: WQY)
+- **Popup Windows**: Word clouds displayed in popups with save button + right-click support
 
 ## Integration Points
 
@@ -61,45 +65,21 @@ This project is a Python GUI application for fetching and analyzing Steam user r
   - Core: `requests`, `customtkinter`, `tkinter`
   - NLP: `jieba` (Chinese), `nltk` (English), `scikit-learn` (TF-IDF)
 
-## Example Patterns
+## Usage Workflows
 
-- To fetch and analyze reviews for a Steam app:
-  1. Enter App ID and game title in the Data Collection tab.
-  2. Choose review count or "Fetch all".
-  3. Click "Fetch & Analyze".
-  4. Results are saved in `data/raw/` and `data/processed/reports/`.
-- To resume a large fetch, use the checkpoint file in `data/cache/`.
-- To view extreme playtime reviews:
-  1. Go to Extreme Reviews tab.
-  2. Load raw JSON or saved results.
-  3. Default filter shows English and Chinese.
-  4. Edit "Languages" field and click "Apply Filter" to show other languages.
-- To perform N-gram analysis:
-  1. Go to N-gram Analysis tab.
-  2. Load raw JSON file.
-  3. Select language (English/Chinese), sentiment (Positive/Negative/Both), n-gram size (2/3).
-  4. Set minimum frequency threshold.
-  5. Click "Analyze" to extract common phrases (bigrams/trigrams only).
-- To perform TF-IDF analysis:
-  1. Go to TF-IDF Analysis tab.
-  2. Load raw JSON file.
-  3. Select language, n-gram range (bigrams/trigrams), and top N terms.
-  4. Click "Analyze" to identify distinctive terms for positive vs negative reviews.
-- To use Text Insights Dashboard:
-  1. Go to Text Insights tab.
-  2. Load raw JSON file.
-  3. Select language (English/Chinese).
-  4. Click "Refresh Analysis" to see quick overview.
-  5. View top 10 bigrams and top 5 distinctive terms per sentiment.
-  6. Click "Deep Dive →" buttons to navigate to detailed analysis tabs.
-- To add a new analyzer:
-  1. Create class inheriting from `BaseAnalyzer` in `analyzers/`.
-  2. Implement `analyze()` method returning dict with results.
-  3. Use `save_output()` helper to save to `data/processed/insights/`.
-- To add a new tab:
-  1. Create class inheriting from `BaseTab` in `tabs/`.
-  2. Implement `get_tab_title()` and `create_ui()` methods.
-  3. Import and instantiate in `main.py`.
+### Data Collection
+1. Enter App ID → Choose count → "Fetch & Analyze" → Results in `data/raw/` and `data/processed/reports/`
+2. Resume: Checkpoint in `data/cache/` allows continuing interrupted downloads
+
+### Text Analysis
+1. **N-gram Analysis**: Load JSON → Select language/sentiment/size → Set threshold → Analyze → Generate word cloud (popup with save button)
+2. **TF-IDF Analysis**: Load JSON → Select language/n-gram range/top N → Analyze → Generate word clouds (2 popups: positive/negative)
+3. **Text Insights**: Load JSON → Select language → Quick overview with navigation to detailed tabs
+4. **Extreme Reviews**: Load JSON → View battles by language → Filter languages (default: English + Chinese)
+
+### Extending
+- **New Analyzer**: Inherit from `BaseAnalyzer` → Implement `analyze()` → Use `save_output()` helper
+- **New Tab**: Inherit from `BaseTab` → Implement `get_tab_title()` and `create_ui()` → Import in `main.py`
 
 ## Key Files
 
@@ -119,9 +99,16 @@ This project is a Python GUI application for fetching and analyzing Steam user r
 - `analyzers/playtime_extremes.py`: Single-pass O(n) extreme review finder with language grouping.
 - `analyzers/ngram_analyzer.py`: N-gram frequency extraction with repetitive filtering.
 - `analyzers/tfidf_analyzer.py`: TF-IDF vectorization for sentiment-distinctive term identification.
-- `requirements.txt`: Dependency list (includes jieba, nltk, scikit-learn).
+- `analyzers/wordcloud_generator.py`: Word cloud image generation with Chinese font support.
+- `requirements.txt`: Dependency list (includes jieba, nltk, scikit-learn, wordcloud, pillow).
 - `README.md`: Setup and usage instructions with roadmap.
 - `docs/LANGUAGE_FILTER_FEATURE.md`: Documentation for per-language filtering feature.
+
+---
+
+## Next Phase: LDA Topic Modeling
+
+Upcoming feature: Latent Dirichlet Allocation (LDA) for topic discovery in Steam reviews.
 
 ---
 
