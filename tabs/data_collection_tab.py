@@ -12,6 +12,7 @@ import csv
 import os
 import re
 import json
+from datetime import datetime
 
 import backend
 import utils
@@ -65,11 +66,15 @@ class DataCollectionTab(BaseTab):
         self.info_appid = tk.StringVar(value="App ID: N/A")
         self.info_total_reviews = tk.StringVar(value="Total Reviews: N/A")
         self.info_date = tk.StringVar(value="Fetched Date: N/A")
+        self.info_oldest_review = tk.StringVar(value="Oldest Review: N/A")
+        self.info_newest_review = tk.StringVar(value="Newest Review: N/A")
         
         ttk.Label(info_frame, textvariable=self.info_title).pack(side=tk.LEFT, padx=20)
         ttk.Label(info_frame, textvariable=self.info_appid).pack(side=tk.LEFT, padx=20)
         ttk.Label(info_frame, textvariable=self.info_total_reviews).pack(side=tk.LEFT, padx=20)
         ttk.Label(info_frame, textvariable=self.info_date).pack(side=tk.LEFT, padx=20)
+        ttk.Label(info_frame, textvariable=self.info_oldest_review).pack(side=tk.LEFT, padx=20)
+        ttk.Label(info_frame, textvariable=self.info_newest_review).pack(side=tk.LEFT, padx=20)
 
         # Report table showing analysis results grouped by language
         table_frame = ttk.Frame(self.frame, padding="10")
@@ -171,7 +176,7 @@ class DataCollectionTab(BaseTab):
                     'appid': appid, 
                     'total_reviews_collected': reviews, 
                     'date_collected_utc': date
-                })
+                }, reviews=None)
             else:
                 # Fallback for legacy filename format
                 match_old = re.match(r"(.+)_(\d{4}-\d{2}-\d{2})_(\w+)_report\.csv", filename)
@@ -186,15 +191,15 @@ class DataCollectionTab(BaseTab):
                     self.update_info_display({
                         'game_title': title, 'appid': appid,
                         'total_reviews_collected': reviews, 'date_collected_utc': date
-                    })
+                    }, reviews=None)
                 else:
-                    self.update_info_display({})
+                    self.update_info_display({}, reviews=None)
 
             self.status_label.config(text=f"Successfully imported report: {filename}")
         except Exception as e:
             messagebox.showerror("Import Error", f"Failed to read CSV.\n\nError: {e}")
             
-    def update_info_display(self, metadata):
+    def update_info_display(self, metadata, reviews=None):
         """
         Update the information panel with dataset metadata.
         
@@ -203,6 +208,7 @@ class DataCollectionTab(BaseTab):
         
         Args:
             metadata: Dictionary with 'appid', 'game_title', 'total_reviews_collected', etc.
+            reviews: Optional list of review dictionaries to extract date range from
         """
         appid = metadata.get('appid', 'N/A')
         game_title = utils.get_game_name(appid) if isinstance(appid, int) else metadata.get('game_title', 'N/A')
@@ -213,6 +219,23 @@ class DataCollectionTab(BaseTab):
         self.info_appid.set(f"App ID: {appid}")
         self.info_total_reviews.set(f"Total Reviews: {total_reviews}")
         self.info_date.set(f"Fetched Date: {date_str}")
+        
+        # Calculate oldest and newest review dates if reviews are provided
+        if reviews and len(reviews) > 0:
+            timestamps = [r.get('timestamp_created', 0) for r in reviews if r.get('timestamp_created', 0) > 0]
+            if timestamps:
+                oldest_timestamp = min(timestamps)
+                newest_timestamp = max(timestamps)
+                oldest_date = datetime.fromtimestamp(oldest_timestamp).strftime('%Y-%m-%d')
+                newest_date = datetime.fromtimestamp(newest_timestamp).strftime('%Y-%m-%d')
+                self.info_oldest_review.set(f"Oldest Review: {oldest_date}")
+                self.info_newest_review.set(f"Newest Review: {newest_date}")
+            else:
+                self.info_oldest_review.set("Oldest Review: N/A")
+                self.info_newest_review.set("Newest Review: N/A")
+        else:
+            self.info_oldest_review.set("Oldest Review: N/A")
+            self.info_newest_review.set("Newest Review: N/A")
 
     def sort_column(self, col, numeric_cols):
         """
@@ -301,7 +324,7 @@ class DataCollectionTab(BaseTab):
             backend.save_reviews_to_json(scraped_data, self.app.status_queue)
             report_data = backend.analyze_and_save_report(scraped_data, self.app.status_queue, game_title=game_title)
             if report_data:
-                self.app.status_queue.put({'type': 'report', 'data': report_data, 'metadata': scraped_data.get('metadata', {})})
+                self.app.status_queue.put({'type': 'report', 'data': report_data, 'metadata': scraped_data.get('metadata', {}), 'reviews': scraped_data.get('reviews', [])})
         elif not self.app.cancel_event.is_set():
              self.app.status_queue.put("No reviews were collected. Cannot generate a report.")
         self.app.status_queue.put({'type': 'done'})
@@ -352,7 +375,7 @@ class DataCollectionTab(BaseTab):
                 
                 report_data = backend.analyze_and_save_report(review_data, self.app.status_queue, game_title=final_title)
                 if report_data:
-                    self.app.status_queue.put({'type': 'report', 'data': report_data, 'metadata': review_data.get('metadata', {})})
+                    self.app.status_queue.put({'type': 'report', 'data': report_data, 'metadata': review_data.get('metadata', {}), 'reviews': review_data.get('reviews', [])})
             else:
                 self.app.status_queue.put("JSON file is invalid or contains no reviews.")
 

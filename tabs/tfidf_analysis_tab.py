@@ -199,17 +199,12 @@ class TfidfAnalysisTab(BaseTab):
                 language=language
             )
             
-            # Store images and show in popups
-            if pos_image:
-                self.positive_wordcloud_image = pos_image
-                self._show_wordcloud_popup(pos_image, "Positive Distinctive Terms", 'positive')
-            
-            if neg_image:
-                self.negative_wordcloud_image = neg_image
-                self._show_wordcloud_popup(neg_image, "Negative Distinctive Terms", 'negative')
-            
+            # Store images and show in single popup
             if pos_image or neg_image:
-                self.wordcloud_status_label.config(text="Word clouds generated! (Shown in popups with save buttons)")
+                self.positive_wordcloud_image = pos_image
+                self.negative_wordcloud_image = neg_image
+                self._show_dual_wordcloud_popup(pos_image, neg_image)
+                self.wordcloud_status_label.config(text="Word clouds generated! (Shown in popup with save buttons)")
             else:
                 self.wordcloud_status_label.config(text="No terms available for word clouds")
         
@@ -217,48 +212,72 @@ class TfidfAnalysisTab(BaseTab):
             self.wordcloud_status_label.config(text=f"Error: {str(e)}")
             messagebox.showerror("Error", f"Failed to generate word clouds:\n{str(e)}")
     
-    def _show_wordcloud_popup(self, image, title, sentiment):
-        """Show word cloud in a popup window with save functionality."""
+    def _show_dual_wordcloud_popup(self, pos_image, neg_image):
+        """Show both word clouds side by side in a single popup window."""
         popup = tk.Toplevel(self.frame)
-        popup.title(title)
-        popup.geometry("650x700")
+        popup.title("TF-IDF Distinctive Terms - Word Clouds")
+        popup.geometry("1300x700")
         
         # Button frame at top
         btn_frame = ttk.Frame(popup)
         btn_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=10)
         
-        ttk.Label(btn_frame, text=title, font=('Arial', 12, 'bold')).pack(side=tk.LEFT)
+        ttk.Label(btn_frame, text="TF-IDF Distinctive Terms", font=('Arial', 12, 'bold')).pack(side=tk.LEFT)
         
-        save_btn = ttk.Button(
-            btn_frame, 
-            text="Save Image", 
-            command=lambda: self._save_popup_image(image, sentiment)
-        )
-        save_btn.pack(side=tk.RIGHT, padx=5)
+        # Save buttons
+        if pos_image:
+            save_pos_btn = ttk.Button(
+                btn_frame,
+                text="Save Positive",
+                command=lambda: self._save_popup_image(pos_image, 'positive')
+            )
+            save_pos_btn.pack(side=tk.RIGHT, padx=5)
         
-        ttk.Label(btn_frame, text="(Right-click image to save)", foreground='gray').pack(side=tk.RIGHT, padx=10)
+        if neg_image:
+            save_neg_btn = ttk.Button(
+                btn_frame,
+                text="Save Negative",
+                command=lambda: self._save_popup_image(neg_image, 'negative')
+            )
+            save_neg_btn.pack(side=tk.RIGHT, padx=5)
         
-        # Create canvas with scrollbars
-        canvas = tk.Canvas(popup)
-        v_scrollbar = ttk.Scrollbar(popup, orient=tk.VERTICAL, command=canvas.yview)
-        h_scrollbar = ttk.Scrollbar(popup, orient=tk.HORIZONTAL, command=canvas.xview)
+        ttk.Label(btn_frame, text="(Right-click images to save)", foreground='gray').pack(side=tk.RIGHT, padx=10)
         
-        canvas.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+        # Main container for both word clouds
+        main_container = ttk.Frame(popup)
+        main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # Left side - Positive word cloud
+        if pos_image:
+            left_frame = ttk.LabelFrame(main_container, text="Positive Distinctive Terms", padding="5")
+            left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+            
+            left_canvas = tk.Canvas(left_frame, bg='white')
+            left_canvas.pack(fill=tk.BOTH, expand=True)
+            
+            pos_photo = ImageTk.PhotoImage(pos_image)
+            left_canvas.create_image(0, 0, anchor=tk.NW, image=pos_photo)
+            left_canvas.image = pos_photo  # Keep reference
+            left_canvas.configure(scrollregion=left_canvas.bbox("all"))
+            
+            # Right-click to save
+            left_canvas.bind("<Button-3>", lambda e: self._save_popup_image(pos_image, 'positive'))
         
-        # Convert to PhotoImage and display
-        photo = ImageTk.PhotoImage(image)
-        canvas.create_image(0, 0, anchor=tk.NW, image=photo)
-        canvas.image = photo  # Keep reference
-        
-        # Right-click to save
-        canvas.bind("<Button-3>", lambda e: self._save_popup_image(image, sentiment))
-        
-        # Update scroll region
-        canvas.configure(scrollregion=canvas.bbox("all"))
+        # Right side - Negative word cloud
+        if neg_image:
+            right_frame = ttk.LabelFrame(main_container, text="Negative Distinctive Terms", padding="5")
+            right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 0))
+            
+            right_canvas = tk.Canvas(right_frame, bg='white')
+            right_canvas.pack(fill=tk.BOTH, expand=True)
+            
+            neg_photo = ImageTk.PhotoImage(neg_image)
+            right_canvas.create_image(0, 0, anchor=tk.NW, image=neg_photo)
+            right_canvas.image = neg_photo  # Keep reference
+            right_canvas.configure(scrollregion=right_canvas.bbox("all"))
+            
+            # Right-click to save
+            right_canvas.bind("<Button-3>", lambda e: self._save_popup_image(neg_image, 'negative'))
     
     def _save_popup_image(self, image, sentiment):
         """Save word cloud image from popup."""

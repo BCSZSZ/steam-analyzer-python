@@ -14,6 +14,7 @@ from tabs.extreme_reviews_tab import ExtremeReviewsTab
 from tabs.text_insights_tab import TextInsightsTab
 from tabs.ngram_analysis_tab import NgramAnalysisTab
 from tabs.tfidf_analysis_tab import TfidfAnalysisTab
+from tabs.timeline_analysis_tab import TimelineAnalysisTab
 from tabs.bertopic_analysis_tab import BERTopicAnalysisTab
 from tabs.bertopic_stopwords_tab import BERTopicStopwordsTab
 
@@ -43,6 +44,7 @@ class SteamReviewApp:
         self.text_insights_tab = TextInsightsTab(self.notebook, self)
         self.ngram_analysis_tab = NgramAnalysisTab(self.notebook, self)
         self.tfidf_analysis_tab = TfidfAnalysisTab(self.notebook, self)
+        self.timeline_analysis_tab = TimelineAnalysisTab(self.notebook, self)
         self.bertopic_analysis_tab = BERTopicAnalysisTab(self.notebook, self)
         self.bertopic_stopwords_tab = BERTopicStopwordsTab(self.notebook, self)
         
@@ -57,7 +59,7 @@ class SteamReviewApp:
                 msg_type = message.get('type')
                 if msg_type == 'report':
                     self.data_collection_tab.populate_table(message['data'])
-                    self.data_collection_tab.update_info_display(message['metadata'])
+                    self.data_collection_tab.update_info_display(message['metadata'], reviews=message.get('reviews'))
                 elif msg_type == 'done':
                     self.data_collection_tab.fetch_button.config(state=tk.NORMAL)
                     self.data_collection_tab.import_button.config(state=tk.NORMAL)
