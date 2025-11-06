@@ -14,6 +14,8 @@ from tabs.extreme_reviews_tab import ExtremeReviewsTab
 from tabs.text_insights_tab import TextInsightsTab
 from tabs.ngram_analysis_tab import NgramAnalysisTab
 from tabs.tfidf_analysis_tab import TfidfAnalysisTab
+from tabs.bertopic_analysis_tab import BERTopicAnalysisTab
+from tabs.bertopic_stopwords_tab import BERTopicStopwordsTab
 
 
 class SteamReviewApp:
@@ -41,6 +43,8 @@ class SteamReviewApp:
         self.text_insights_tab = TextInsightsTab(self.notebook, self)
         self.ngram_analysis_tab = NgramAnalysisTab(self.notebook, self)
         self.tfidf_analysis_tab = TfidfAnalysisTab(self.notebook, self)
+        self.bertopic_analysis_tab = BERTopicAnalysisTab(self.notebook, self)
+        self.bertopic_stopwords_tab = BERTopicStopwordsTab(self.notebook, self)
         
         # Start queue processing
         self.process_queue()

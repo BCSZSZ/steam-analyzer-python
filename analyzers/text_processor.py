@@ -61,6 +61,23 @@ class TextProcessor:
         # Preload jieba for better performance
         jieba.initialize()
     
+    def get_stopwords(self, language: str):
+        """
+        Get stopwords for the specified language.
+        
+        Args:
+            language: 'english' or 'schinese'
+        
+        Returns:
+            Set of stopwords or None
+        """
+        if language == 'english':
+            return self.ENGLISH_STOPWORDS
+        elif language == 'schinese':
+            return self.CHINESE_STOPWORDS
+        else:
+            return None
+    
     def clean_text(self, text: str) -> str:
         """
         Clean text by removing URLs, special characters, and extra whitespace.

@@ -7,11 +7,13 @@ Python GUI application for fetching and analyzing Steam user reviews with advanc
 ## Architecture & Data Flow
 
 ### Core Components
+
 - **main.py**: Entry point, creates tabbed GUI with status queue. 5 tabs: Data Collection, Extreme Reviews, Text Insights, N-gram Analysis, TF-IDF Analysis.
 - **backend.py**: Steam API fetching, checkpointing (every 50 pages), saves to `data/raw/`.
 - **utils.py**: Game name caching (Steam Store API, cache-first pattern).
 
 ### Tabs (inherit from BaseTab)
+
 - `data_collection_tab.py`: Fetch reviews, generate language reports
 - `extreme_reviews_tab.py`: Display extreme playtime reviews with language filtering
 - `text_insights_tab.py`: Dashboard with N-gram + TF-IDF quick views (frozen, kept as-is)
@@ -19,6 +21,7 @@ Python GUI application for fetching and analyzing Steam user reviews with advanc
 - `tfidf_analysis_tab.py`: TF-IDF distinctive terms (positive vs negative) with dual word clouds
 
 ### Analyzers (inherit from BaseAnalyzer)
+
 - `language_report.py`: CSV reports by language with sentiment stats
 - `playtime_extremes.py`: Single-pass O(n) extreme finder with language grouping
 - `text_processor.py`: Tokenization, stopwords, n-gram generation (English: NLTK, Chinese: Jieba)
@@ -27,6 +30,7 @@ Python GUI application for fetching and analyzing Steam user reviews with advanc
 - `wordcloud_generator.py`: Word cloud images with Chinese font detection
 
 ### Data Structure
+
 - `data/raw/`: Raw JSON (`{appid}_{date}_{count}_reviews.json`)
 - `data/processed/reports/`: CSV language reports
 - `data/processed/insights/`: JSON analysis results (extreme, n-grams, TF-IDF)
@@ -49,7 +53,7 @@ Python GUI application for fetching and analyzing Steam user reviews with advanc
 - **Single-Pass Algorithms**: O(n) complexity where possible
 - **N-gram Filtering**: Only bigrams/trigrams (unigrams excluded), repetitive patterns filtered
 - **TF-IDF Vectorization**: Tokenized reviews space-separated before scikit-learn processing
-- **Word Cloud Settings**: 
+- **Word Cloud Settings**:
   - `prefer_horizontal=1.0` (no vertical text)
   - `relative_scaling=0.3` (balanced sizes)
   - `min_font_size=12`, `max_font_size=80`
@@ -68,16 +72,19 @@ Python GUI application for fetching and analyzing Steam user reviews with advanc
 ## Usage Workflows
 
 ### Data Collection
+
 1. Enter App ID → Choose count → "Fetch & Analyze" → Results in `data/raw/` and `data/processed/reports/`
 2. Resume: Checkpoint in `data/cache/` allows continuing interrupted downloads
 
 ### Text Analysis
+
 1. **N-gram Analysis**: Load JSON → Select language/sentiment/size → Set threshold → Analyze → Generate word cloud (popup with save button)
 2. **TF-IDF Analysis**: Load JSON → Select language/n-gram range/top N → Analyze → Generate word clouds (2 popups: positive/negative)
 3. **Text Insights**: Load JSON → Select language → Quick overview with navigation to detailed tabs
 4. **Extreme Reviews**: Load JSON → View battles by language → Filter languages (default: English + Chinese)
 
 ### Extending
+
 - **New Analyzer**: Inherit from `BaseAnalyzer` → Implement `analyze()` → Use `save_output()` helper
 - **New Tab**: Inherit from `BaseTab` → Implement `get_tab_title()` and `create_ui()` → Import in `main.py`
 

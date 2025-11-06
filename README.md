@@ -36,12 +36,14 @@ A Python GUI application for fetching, analyzing, and visualizing Steam user rev
 ### Setup
 
 1. Clone repository:
+
 ```bash
 git clone https://github.com/BCSZSZ/steam-analyzer-python.git
 cd steam-analyzer-python
 ```
 
 2. Create virtual environment (recommended):
+
 ```bash
 python -m venv venv
 # Windows: .\venv\Scripts\activate
@@ -49,11 +51,13 @@ python -m venv venv
 ```
 
 3. Install dependencies:
+
 ```bash
 pip install -r requirements.txt
 ```
 
 4. Run application:
+
 ```bash
 python main.py
 ```
@@ -63,29 +67,34 @@ python main.py
 ## 🎯 Usage
 
 ### 1. Data Collection Tab
+
 - Enter Steam App ID (e.g., `1030300` for Baldur's Gate 3)
 - Choose review count or fetch all
 - Click "Fetch & Analyze" to download and generate language report
 - Resume interrupted downloads from checkpoints
 
 ### 2. Extreme Reviews Tab
+
 - Load raw JSON or saved results
 - View reviews with longest playtime per language
 - Filter by language (default: English and Chinese)
 
 ### 3. Text Insights Dashboard
+
 - Load raw JSON file
 - Select language (English/Chinese)
 - View quick overview of top N-grams and distinctive terms
 - Navigate to detailed analysis tabs
 
 ### 4. N-gram Analysis Tab
+
 - Load raw JSON file
 - Select language, sentiment, N-gram size (bigrams/trigrams)
 - Set minimum frequency threshold
 - Generate word cloud visualization (horizontal words, balanced sizes)
 
 ### 5. TF-IDF Analysis Tab
+
 - Load raw JSON file
 - Select language, N-gram range, top N terms
 - View distinctive terms for positive vs negative reviews
@@ -96,23 +105,27 @@ python main.py
 ## 🔍 Analysis Features
 
 ### Language Report (CSV)
+
 - Reviews grouped by language with sentiment statistics
 - Steam category assignment (Overwhelmingly Positive, Mixed, etc.)
 - Playtime metrics and user profiles
 
 ### N-gram Analysis
+
 - Extract common phrases (bigrams/trigrams only, unigrams excluded)
 - Language-specific tokenization (NLTK for English, Jieba for Chinese)
 - Repetitive N-gram filtering
 - Frequency-based word clouds
 
 ### TF-IDF Analysis
+
 - Identify distinctive terms using scikit-learn TF-IDF vectorization
 - Compare positive vs negative sentiment vocabulary
 - Distinctiveness scoring for term importance
 - Dual word clouds (green for positive, red for negative)
 
 ### Word Cloud Generation
+
 - Horizontal text only (no vertical words)
 - Balanced font sizes (reduced variance between largest/smallest)
 - Automatic Chinese font detection (Windows/macOS/Linux)
@@ -161,6 +174,7 @@ steam-analyzer-python/
 ## 💾 Data Outputs
 
 ### File Naming
+
 - Raw JSON: `{appid}_{date}_{count}_reviews.json`
 - CSV Report: `{appid}_{game_name}_{date}_{count}_report.csv`
 - N-gram Analysis: `{appid}_{game_name}_{language}_{sentiment}_ngrams_{date}.json`
@@ -168,6 +182,7 @@ steam-analyzer-python/
 - Extreme Reviews: `{appid}_extreme_reviews_by_language_{date}.json`
 
 ### Storage
+
 - `data/raw/` - Raw review JSON files
 - `data/processed/reports/` - CSV language reports
 - `data/processed/insights/` - JSON analysis results
@@ -178,6 +193,7 @@ steam-analyzer-python/
 ## 🗺️ Roadmap
 
 ### Completed ✅
+
 - [x] Steam API fetching with checkpointing
 - [x] Multi-language CSV reports
 - [x] Extreme playtime analysis with language filtering
@@ -187,12 +203,14 @@ steam-analyzer-python/
 - [x] Word cloud visualization with Chinese font support
 
 ### Next: Phase 4 - Topic Modeling 🚧
+
 - [ ] LDA (Latent Dirichlet Allocation) topic modeling
 - [ ] Topic distribution visualization
 - [ ] Topic-based review clustering
 - [ ] Topic evolution over time
 
 ### Future Features 💡
+
 - [ ] Sentiment timeline analysis
 - [ ] Multi-game comparison
 - [ ] Advanced filtering (date range, playtime)

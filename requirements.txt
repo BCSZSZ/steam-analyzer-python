@@ -6,3 +6,10 @@ scikit-learn
 wordcloud
 pillow
 matplotlib
+
+# BERTopic and dependencies for topic modeling
+bertopic
+sentence-transformers
+umap-learn
+hdbscan
+plotly
