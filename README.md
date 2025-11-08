@@ -15,14 +15,25 @@ A Python GUI application for fetching, analyzing, and visualizing Steam user rev
 
 ## ✨ Features
 
-- **Data Collection**: Fetch reviews from Steam API with checkpointing and resume capability
-- **Language Reports**: CSV reports with sentiment analysis grouped by language (20+ languages)
-- **Extreme Reviews**: Find reviews with longest playtime per language
-- **Text Insights Dashboard**: Quick overview of N-gram and TF-IDF analysis results
-- **N-gram Analysis**: Extract common phrases (bigrams/trigrams) with frequency filtering
-- **TF-IDF Analysis**: Identify distinctive terms for positive vs negative reviews
-- **Word Cloud Visualization**: Generate visual word clouds with Chinese font support
-- **Multi-language Support**: English and Chinese (Simplified) with language-specific tokenization
+### Data Collection & Management
+- **Smart Fetching**: Steam API integration with automatic checkpoint every 50 pages
+- **Resume Capability**: Pick up interrupted downloads from any checkpoint file
+- **Console Logging**: Real-time progress tracking with percentage, timing, and cursor info
+- **Game Name Caching**: Automatic retrieval and caching of game titles from Steam Store API
+
+### Analysis Modules
+- **Language Reports**: CSV exports with sentiment stats for 20+ languages
+- **Extreme Reviews**: Longest playtime reviews grouped by language with filtering
+- **N-gram Analysis**: Common phrase extraction (bigrams/trigrams) with word clouds
+- **TF-IDF Analysis**: Distinctive term identification (positive vs negative sentiment)
+- **Timeline Analysis**: Interactive charts with auto-determined rolling window, dual y-axes for rates and counts
+- **Text Insights Dashboard**: Quick overview panel with navigation to detailed analysis
+
+### Customization & Visualization
+- **Stopwords Manager**: Table-based editor for universal and game-specific stopwords (dual-key system)
+- **Word Clouds**: High-quality visualizations with Chinese font auto-detection, horizontal layout
+- **Interactive Charts**: Plotly timeline graphs (1800x900) opening in browser with zoom/pan/hover
+- **Multi-language NLP**: NLTK (English) and Jieba (Chinese) with customizable tokenization
 
 ---
 
@@ -64,41 +75,72 @@ python main.py
 
 ---
 
-## 🎯 Usage
+## 🎯 Usage Guide
 
 ### 1. Data Collection Tab
 
-- Enter Steam App ID (e.g., `1030300` for Baldur's Gate 3)
-- Choose review count or fetch all
-- Click "Fetch & Analyze" to download and generate language report
-- Resume interrupted downloads from checkpoints
+**Fetch Reviews**:
+- Enter Steam App ID (e.g., `1030300` for Hollow Knight: Silksong, `1091500` for Cyberpunk 2077)
+- Choose review count (1000 for quick test, "all" for complete dataset)
+- Click "Fetch & Analyze" → Downloads reviews + generates CSV language report
+- Watch console for real-time progress: `[FETCH] Page 1 | Reviews: +100 (Total: 100 / 5,000 = 2.0%) | Time: 0.85s`
 
-### 2. Extreme Reviews Tab
+**Resume Downloads**:
+- If download is interrupted (network error, cancel, etc.), checkpoint is auto-saved
+- Click "Resume from Checkpoint" → Select checkpoint file → Continues from where it stopped
+- Checkpoints are saved every 50 pages and on any error
+
+### 2. Timeline Analysis Tab ⭐ NEW
+
+- Load raw JSON file from `data/raw/`
+- Select language filter (or "all" for combined)
+- Set rolling window (0 = auto-determine based on date range, or 1-90 days manually)
+- Click "Generate Timeline Chart" → Opens interactive graph in browser
+- **Chart shows 4 lines**:
+  - 🔵 Rolling Average Rate (dotted blue) - smoothed positive rate trend
+  - 🔴 Cumulative Rate (dotted red) - overall positive rate evolution
+  - 🟢 Cumulative Review Count (solid green) - total reviews over time
+  - 🟠 Cumulative Positive Count (solid orange) - positive reviews over time
+
+### 3. Extreme Reviews Tab
 
 - Load raw JSON or saved results
-- View reviews with longest playtime per language
-- Filter by language (default: English and Chinese)
-
-### 3. Text Insights Dashboard
-
-- Load raw JSON file
-- Select language (English/Chinese)
-- View quick overview of top N-grams and distinctive terms
-- Navigate to detailed analysis tabs
+- View "playtime battles": reviews with longest playtime per language
+- Filter by language using checkboxes (default: English + Chinese)
+- Great for finding dedicated players' opinions
 
 ### 4. N-gram Analysis Tab
 
 - Load raw JSON file
-- Select language, sentiment, N-gram size (bigrams/trigrams)
-- Set minimum frequency threshold
-- Generate word cloud visualization (horizontal words, balanced sizes)
+- Select language, sentiment (positive/negative/all), N-gram size (bigrams/trigrams)
+- Set minimum frequency threshold (filters out rare phrases)
+- Click "Analyze" → View frequency table
+- Click "Generate Word Cloud" → Popup window with visualization (horizontal layout, save button)
 
 ### 5. TF-IDF Analysis Tab
 
 - Load raw JSON file
-- Select language, N-gram range, top N terms
-- View distinctive terms for positive vs negative reviews
-- Generate dual word clouds with Chinese font support
+- Select language, N-gram range (2-2 for bigrams, 2-3 for bigrams+trigrams)
+- Set top N terms to display (e.g., 30)
+- Click "Analyze" → View distinctive terms table
+- Click "Generate Word Clouds" → 2 popup windows (green=positive, red=negative)
+- Shows which phrases are unique to positive vs negative reviews
+
+### 6. Text Insights Dashboard
+
+- Load raw JSON file
+- Select language
+- View quick overview of top N-grams and TF-IDF terms in one screen
+- Navigate to detailed tabs for deeper analysis
+
+### 7. Stopwords Manager Tab
+
+- **Universal Stopwords**: Apply to all games (e.g., "game", "play", "fun")
+- **Game-Specific Stopwords**: Apply to specific App ID (e.g., "hollow", "knight" for 1030300)
+- Table view with dual keys: English (`{appid}_{game_name}`) and Chinese (`{appid}_{game_name}_CN`)
+- Double-click to edit terms (comma-separated)
+- Click "Save" to apply changes (affects N-gram, TF-IDF, BERTopic analysis)
+- Auto-loads on application startup
 
 ---
 
@@ -106,31 +148,56 @@ python main.py
 
 ### Language Report (CSV)
 
-- Reviews grouped by language with sentiment statistics
-- Steam category assignment (Overwhelmingly Positive, Mixed, etc.)
-- Playtime metrics and user profiles
+- Reviews grouped by language with sentiment statistics (20+ languages)
+- Steam category assignment (Overwhelmingly Positive, Mixed, Negative, etc.)
+- Playtime metrics (average, median) and user profile counts
+- Excel-compatible format for further analysis
+
+### Timeline Analysis ⭐
+
+- **Auto-Determined Rolling Window**: Intelligent window size based on date range
+  - <30 days → 3-day window
+  - 30-90 days → 7-day window
+  - 90-180 days → 14-day window
+  - 180-365 days → 30-day window
+  - >365 days → 60-day window
+- **Divide-by-Zero Failover**: Uses previous day's rate when no reviews in window
+- **Dual Y-Axes**: Percentage rates (0-100%) on left, review counts on right
+- **4 Data Lines**: Rolling average, cumulative rate, cumulative count, cumulative positive count
+- **Visual Grouping**: Dotted lines for rates, solid lines for counts
+- **Interactive Plotly Charts**: Zoom, pan, hover tooltips, opens in browser (1800x900)
 
 ### N-gram Analysis
 
-- Extract common phrases (bigrams/trigrams only, unigrams excluded)
+- Extract common phrases (bigrams/trigrams only, unigrams excluded for clarity)
 - Language-specific tokenization (NLTK for English, Jieba for Chinese)
-- Repetitive N-gram filtering
-- Frequency-based word clouds
+- Repetitive N-gram filtering (e.g., "really really really" excluded)
+- Custom stopwords (universal + game-specific from Stopwords Manager)
+- Frequency-based word clouds with horizontal layout
 
 ### TF-IDF Analysis
 
 - Identify distinctive terms using scikit-learn TF-IDF vectorization
 - Compare positive vs negative sentiment vocabulary
-- Distinctiveness scoring for term importance
+- Distinctiveness scoring for term importance (shows what makes each sentiment unique)
 - Dual word clouds (green for positive, red for negative)
+- Custom stopwords integration
 
 ### Word Cloud Generation
 
-- Horizontal text only (no vertical words)
-- Balanced font sizes (reduced variance between largest/smallest)
-- Automatic Chinese font detection (Windows/macOS/Linux)
+- Horizontal text only (no vertical words, easier to read)
+- Balanced font sizes (`relative_scaling=0.3` reduces variance)
+- Automatic Chinese font detection (Windows: SimHei/YaHei, macOS: PingFang, Linux: WQY)
 - Popup windows with save button and right-click support
 - High resolution (1200x600 for N-gram, 600x600 per TF-IDF)
+
+### Stopwords Management
+
+- **Universal Stopwords**: Common words to exclude from all games ("game", "play", etc.)
+- **Game-Specific Stopwords**: Exclude game-specific terms (e.g., game title words)
+- **Dual-Key System**: English key + Chinese key per game for multi-language support
+- **Table View**: Editable grid with game name (read-only) and terms (editable)
+- **Auto-Load**: Loads on app startup, applies to N-gram, TF-IDF, BERTopic analysis
 
 ## 📁 Project Structure
 
@@ -146,15 +213,18 @@ steam-analyzer-python/
 │   ├── playtime_extremes.py     # Extreme review finder
 │   ├── ngram_analyzer.py        # N-gram frequency extraction
 │   ├── tfidf_analyzer.py        # TF-IDF vectorization
-│   ├── text_processor.py        # NLP utilities (tokenization, n-grams)
+│   ├── timeline_analyzer.py     # Time-series sentiment analysis
+│   ├── text_processor.py        # NLP utilities (tokenization, stopwords, n-grams)
 │   └── wordcloud_generator.py   # Word cloud image generation
 ├── tabs/                        # UI tab modules (plugin-based)
 │   ├── base_tab.py              # Abstract base class
-│   ├── data_collection_tab.py   # Fetch & analyze interface
+│   ├── data_collection_tab.py   # Fetch & analyze with resume capability
 │   ├── extreme_reviews_tab.py   # Extreme reviews visualization
+│   ├── timeline_analysis_tab.py # Interactive timeline charts
 │   ├── text_insights_tab.py     # Quick analysis dashboard
 │   ├── ngram_analysis_tab.py    # N-gram frequency analysis
-│   └── tfidf_analysis_tab.py    # TF-IDF distinctive terms
+│   ├── tfidf_analysis_tab.py    # TF-IDF distinctive terms
+│   └── bertopic_stopwords_tab.py # Stopwords manager (universal + game-specific)
 └── data/                        # Data storage (auto-created)
     ├── raw/                     # Raw review JSON files
     ├── processed/
@@ -165,57 +235,70 @@ steam-analyzer-python/
 
 ### Architecture Highlights
 
-- **Plugin Architecture**: Tabs and analyzers inherit from base classes for extensibility
-- **Single-Pass Algorithms**: O(n) complexity for efficient processing
-- **Checkpointing**: Resume capability for large downloads
-- **Language-Specific NLP**: NLTK (English) and Jieba (Chinese) tokenization
-- **Thread-Safe UI**: Background workers with queue-based updates
+- **Plugin Architecture**: Tabs and analyzers inherit from base classes for easy extensibility
+- **Single-Pass Algorithms**: O(n) complexity for efficient large dataset processing
+- **Smart Checkpointing**: Auto-save every 50 pages, on empty page, cancel, or any exception
+- **Resume Workflow**: File picker to select any checkpoint, continues from saved cursor
+- **Separate Checkpoint Files**: Raw data and checkpoint metadata stored separately, checkpoints deleted on completion
+- **Language-Specific NLP**: NLTK (English) and Jieba (Chinese) with customizable stopwords
+- **Thread-Safe UI**: Background workers with queue-based updates, no UI freezing
+- **Cache-First Pattern**: Game names cached locally to minimize Steam Store API calls
+- **Consolidated Logging**: Single `[FETCH]` log line per page with progress %, timing, cursor
 
 ## 💾 Data Outputs
 
-### File Naming
+### File Naming Convention
 
-- Raw JSON: `{appid}_{date}_{count}_reviews.json`
-- CSV Report: `{appid}_{game_name}_{date}_{count}_report.csv`
-- N-gram Analysis: `{appid}_{game_name}_{language}_{sentiment}_ngrams_{date}.json`
-- TF-IDF Analysis: `{appid}_{game_name}_{language}_tfidf_{date}.json`
-- Extreme Reviews: `{appid}_extreme_reviews_by_language_{date}.json`
+- **Raw JSON**: `{appid}_{YYYY-MM-DD}_{HH-MM-SS}_{target}_{current}_reviews.json`
+  - Example: `1030300_2025-11-06_14-30-00_5000_2500_reviews.json`
+- **Checkpoint**: `{appid}_{YYYY-MM-DD}_{HH-MM-SS}_{target}_{current}_checkpoint.json`
+  - Contains cursor, metadata for resuming
+- **CSV Report**: `{appid}_{game_name}_{date}_all_report.csv`
+- **N-gram Analysis**: `{appid}_{game_name}_{language}_{sentiment}_ngrams_{date}.json`
+- **TF-IDF Analysis**: `{appid}_{game_name}_{language}_tfidf_{date}.json`
+- **Timeline Analysis**: `{appid}_{game_name}_{language}_timeline_{date}.json`
+- **Extreme Reviews**: `{appid}_extreme_reviews_by_language_{date}.json`
 
-### Storage
+### Storage Structure
 
-- `data/raw/` - Raw review JSON files
-- `data/processed/reports/` - CSV language reports
-- `data/processed/insights/` - JSON analysis results
-- `data/cache/` - Checkpoints and game name cache
+- `data/raw/` - Raw review JSON files (source data)
+- `data/processed/reports/` - CSV language reports (Excel-compatible)
+- `data/processed/insights/` - JSON analysis results (all tabs)
+- `data/cache/` - Checkpoints (auto-deleted on completion) + app_details cache
+- `data/stopwords.json` - Custom stopwords (universal + game-specific with dual keys)
 
 ---
 
 ## 🗺️ Roadmap
 
-### Completed ✅
+### Completed ✅ (November 2025)
 
-- [x] Steam API fetching with checkpointing
-- [x] Multi-language CSV reports
+- [x] Steam API fetching with checkpoint/resume system
+- [x] Consolidated fetch logging with progress tracking
+- [x] Multi-language CSV reports with sentiment analysis
 - [x] Extreme playtime analysis with language filtering
-- [x] Text Insights Dashboard
-- [x] N-gram frequency analysis (bigrams/trigrams)
-- [x] TF-IDF distinctive term extraction
-- [x] Word cloud visualization with Chinese font support
+- [x] N-gram frequency analysis (bigrams/trigrams) with word clouds
+- [x] TF-IDF distinctive term extraction with dual word clouds
+- [x] Timeline sentiment analysis with auto-determined rolling window
+- [x] Interactive Plotly charts (dual y-axes, 4 lines, 1800x900)
+- [x] Universal stopwords manager with table view and dual-key system
+- [x] Text Insights Dashboard for quick overview
+- [x] Game name caching from Steam Store API
 
-### Next: Phase 4 - Topic Modeling 🚧
+### In Progress 🚧
 
-- [ ] LDA (Latent Dirichlet Allocation) topic modeling
+- [ ] BERTopic integration for advanced topic modeling
 - [ ] Topic distribution visualization
-- [ ] Topic-based review clustering
 - [ ] Topic evolution over time
 
 ### Future Features 💡
 
-- [ ] Sentiment timeline analysis
-- [ ] Multi-game comparison
-- [ ] Advanced filtering (date range, playtime)
-- [ ] Export to Excel/PDF
-- [ ] Batch analysis automation
+- [ ] Multi-game comparison dashboard
+- [ ] Advanced filtering (date range, playtime brackets, user type)
+- [ ] Export enhancements (Excel, PDF reports)
+- [ ] Batch analysis automation (analyze multiple games in queue)
+- [ ] Recommendation system based on review patterns
+- [ ] API endpoint for programmatic access
 
 ---
 

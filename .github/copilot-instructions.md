@@ -2,7 +2,12 @@
 
 ## Project Overview
 
-Python GUI application for fetching and analyzing Steam user reviews with advanced text analysis. Features N-gram frequency analysis, TF-IDF distinctive term extraction, and word cloud visualization with multi-language support (English/Chinese). Data flows: Steam API → raw JSON → analysis pipelines → CSV/JSON outputs + visualizations.
+Python GUI application for fetching and analyzing Steam user reviews with comprehensive text analysis and visualization. Features include:
+- **Data Collection**: Steam API fetching with checkpoint/resume capability
+- **Text Analysis**: N-gram frequency, TF-IDF distinctive terms, timeline sentiment tracking
+- **Visualization**: Word clouds, interactive Plotly timeline charts with dual y-axes
+- **Language Support**: English/Chinese with customizable stopwords manager
+- **Data Flow**: Steam API → checkpointed raw JSON → analysis pipelines → CSV/JSON outputs + HTML visualizations
 
 ## Architecture & Data Flow
 
@@ -14,27 +19,31 @@ Python GUI application for fetching and analyzing Steam user reviews with advanc
 
 ### Tabs (inherit from BaseTab)
 
-- `data_collection_tab.py`: Fetch reviews, generate language reports
+- `data_collection_tab.py`: Fetch reviews with resume from checkpoint, generate language reports
 - `extreme_reviews_tab.py`: Display extreme playtime reviews with language filtering
 - `text_insights_tab.py`: Dashboard with N-gram + TF-IDF quick views (frozen, kept as-is)
 - `ngram_analysis_tab.py`: N-gram frequency analysis (bigrams/trigrams) with word clouds
 - `tfidf_analysis_tab.py`: TF-IDF distinctive terms (positive vs negative) with dual word clouds
+- `timeline_analysis_tab.py`: Interactive timeline with auto-determined rolling window, cumulative counts
+- `bertopic_stopwords_tab.py`: Universal stopwords manager with table view, dual-key system
 
 ### Analyzers (inherit from BaseAnalyzer)
 
 - `language_report.py`: CSV reports by language with sentiment stats
 - `playtime_extremes.py`: Single-pass O(n) extreme finder with language grouping
-- `text_processor.py`: Tokenization, stopwords, n-gram generation (English: NLTK, Chinese: Jieba)
+- `text_processor.py`: Tokenization, custom stopwords (universal + game-specific), n-gram generation
 - `ngram_analyzer.py`: Frequency extraction, repetitive filtering
 - `tfidf_analyzer.py`: scikit-learn TF-IDF vectorization for sentiment comparison
+- `timeline_analyzer.py`: Time-series analysis with auto-determined rolling window, divide-by-zero failover
 - `wordcloud_generator.py`: Word cloud images with Chinese font detection
 
 ### Data Structure
 
-- `data/raw/`: Raw JSON (`{appid}_{date}_{count}_reviews.json`)
+- `data/raw/`: Raw JSON (`{appid}_{YYYY-MM-DD}_{HH-MM-SS}_{target}_{current}_reviews.json`)
 - `data/processed/reports/`: CSV language reports
-- `data/processed/insights/`: JSON analysis results (extreme, n-grams, TF-IDF)
-- `data/cache/`: Checkpoints + app_details cache
+- `data/processed/insights/`: JSON analysis results (extreme, n-grams, TF-IDF, timeline)
+- `data/cache/`: Separate checkpoint files + app_details cache
+- `data/stopwords.json`: Universal + game-specific custom stopwords (dual-key system)
 
 ## Developer Workflows
 
@@ -46,19 +55,26 @@ Python GUI application for fetching and analyzing Steam user reviews with advanc
 ## Key Conventions
 
 - **Threading**: Daemon threads for long operations, `status_queue`/`frame.after()` for thread-safe UI updates
-- **Language Support**: English (NLTK) and Chinese (Jieba) with language-specific tokenization/stopwords
-- **File Naming**: `{appid}_{game_name}_{language}_{sentiment}_{type}_{date}` for traceability
-- **Checkpointing**: Every 50 pages during fetch, stored in `data/cache/`
+- **Language Support**: English (NLTK) and Chinese (Jieba) with customizable stopwords (universal + game-specific)
+- **File Naming**: 
+  - Raw data: `{appid}_{YYYY-MM-DD}_{HH-MM-SS}_{target}_{current}_reviews.json`
+  - Checkpoint: `{appid}_{YYYY-MM-DD}_{HH-MM-SS}_{target}_{current}_checkpoint.json`
+  - Analysis: `{appid}_{game_name}_{language}_{sentiment}_{type}_{date}`
+- **Checkpointing**: Every 50 pages, on empty page, cancel, or exception → separate JSON files, deleted on completion
+- **Resume Workflow**: File picker to select checkpoint, extracts metadata, continues from cursor
+- **Logging**: Consolidated `[FETCH]` logs per page with progress %, time, status, full cursor
 - **Plugin Architecture**: Tabs inherit from `BaseTab`, analyzers from `BaseAnalyzer`
 - **Single-Pass Algorithms**: O(n) complexity where possible
 - **N-gram Filtering**: Only bigrams/trigrams (unigrams excluded), repetitive patterns filtered
 - **TF-IDF Vectorization**: Tokenized reviews space-separated before scikit-learn processing
+- **Timeline Analysis**: Auto-determined rolling window (3-60 days based on date range), divide-by-zero failover
 - **Word Cloud Settings**:
   - `prefer_horizontal=1.0` (no vertical text)
   - `relative_scaling=0.3` (balanced sizes)
   - `min_font_size=12`, `max_font_size=80`
   - Chinese font auto-detection (Windows: SimHei/YaHei, macOS: PingFang, Linux: WQY)
-- **Popup Windows**: Word clouds displayed in popups with save button + right-click support
+- **Visualization Windows**: Word clouds in popups, timeline charts in browser (1800x900 Plotly HTML)
+- **Stopwords Manager**: Table view with dual keys (English + CN per game), auto-load on startup
 
 ## Integration Points
 
@@ -74,14 +90,17 @@ Python GUI application for fetching and analyzing Steam user reviews with advanc
 ### Data Collection
 
 1. Enter App ID → Choose count → "Fetch & Analyze" → Results in `data/raw/` and `data/processed/reports/`
-2. Resume: Checkpoint in `data/cache/` allows continuing interrupted downloads
+2. Resume: "Resume from Checkpoint" button → File picker → Select checkpoint JSON → Continue from saved cursor
+3. Console logs: `[FETCH] Page N | Reviews: +X (Total: Y/Z = %) | Time: Xs | Status: OK | Cursor: full_cursor`
 
 ### Text Analysis
 
 1. **N-gram Analysis**: Load JSON → Select language/sentiment/size → Set threshold → Analyze → Generate word cloud (popup with save button)
 2. **TF-IDF Analysis**: Load JSON → Select language/n-gram range/top N → Analyze → Generate word clouds (2 popups: positive/negative)
-3. **Text Insights**: Load JSON → Select language → Quick overview with navigation to detailed tabs
-4. **Extreme Reviews**: Load JSON → View battles by language → Filter languages (default: English + Chinese)
+3. **Timeline Analysis**: Load JSON → Select language → Set rolling window (0=auto) → Generate chart → Opens in browser (4 lines: 2 dotted rates + 2 solid counts)
+4. **Text Insights**: Load JSON → Select language → Quick overview with navigation to detailed tabs
+5. **Extreme Reviews**: Load JSON → View battles by language → Filter languages (default: English + Chinese)
+6. **Stopwords Manager**: Edit universal/game-specific stopwords → Table view with dual keys → Auto-loads on app start
 
 ### Extending
 
@@ -113,9 +132,19 @@ Python GUI application for fetching and analyzing Steam user reviews with advanc
 
 ---
 
-## Next Phase: LDA Topic Modeling
+## Current State (November 2025)
 
-Upcoming feature: Latent Dirichlet Allocation (LDA) for topic discovery in Steam reviews.
+✅ **Completed Features**:
+- Steam API fetching with checkpoint/resume system
+- Language reports (CSV) with sentiment analysis
+- Extreme playtime reviews with language filtering
+- N-gram frequency analysis (bigrams/trigrams) with word clouds
+- TF-IDF distinctive terms (positive vs negative) with dual word clouds
+- Timeline analysis with auto-determined rolling window and cumulative counts
+- Universal stopwords manager with table view and dual-key system
+- Consolidated fetch logging with progress tracking
+
+🚧 **Next Phase**: BERTopic integration for advanced topic modeling
 
 ---
 
