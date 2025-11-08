@@ -281,11 +281,32 @@ class TfidfAnalysisTab(BaseTab):
     
     def _save_popup_image(self, image, sentiment):
         """Save word cloud image from popup."""
+        # Generate default filename from current results
+        import os
+        default_filename = f"{sentiment}_wordcloud.png"
+        if self.current_results:
+            from datetime import datetime
+            metadata = self.current_results.get('metadata', {})
+            game_name = self.current_results.get('game_name', '').replace(' ', '_').replace("'", '')
+            appid = metadata.get('appid', '')
+            params = self.current_results.get('analysis_params', {})
+            language = params.get('language', 'unknown')
+            ngram_range = params.get('ngram_range', (1, 2))
+            date_str = datetime.now().strftime('%Y-%m-%d')
+            
+            # Format ngram range as "1-2" or "2-2"
+            ngram_str = f"{ngram_range[0]}-{ngram_range[1]}"
+            default_filename = f"{appid}_{game_name}_{language}_{sentiment}_tfidf_ng{ngram_str}_wordcloud_{date_str}.png"
+        
+        # Use absolute path for initialdir
+        initial_dir = os.path.abspath("./data/processed")
+        
         filepath = filedialog.asksaveasfilename(
             title=f"Save {sentiment.capitalize()} Word Cloud",
             defaultextension=".png",
             filetypes=[("PNG Image", "*.png"), ("All Files", "*.*")],
-            initialdir="./data/processed"
+            initialdir=initial_dir,
+            initialfile=default_filename
         )
         
         if filepath:
@@ -367,6 +388,13 @@ class TfidfAnalysisTab(BaseTab):
         
         except Exception as e:
             messagebox.showerror("Error", f"Failed to load results:\n{e}")
+    
+    def _clear_results_display(self):
+        """Clear the results display treeviews."""
+        self.positive_tree.delete(*self.positive_tree.get_children())
+        self.negative_tree.delete(*self.negative_tree.get_children())
+        self.positive_tree.insert('', tk.END, values=('', 'Load data and click "Analyze"', ''))
+        self.negative_tree.insert('', tk.END, values=('', 'to see results here', ''))
     
     def clear_data(self):
         """Clear loaded data and free memory."""

@@ -61,6 +61,10 @@ class BERTopicAnalyzer(BaseAnalyzer):
         print(f"N-gram Range: {ngram_range}")
         print(f"Sentiment Filter: {sentiment_filter or 'All'}")
         
+        # Extract metadata (for appid-specific stopwords)
+        metadata = json_data.get('metadata', {})
+        appid = metadata.get('appid', '')
+        
         # Extract reviews
         reviews = json_data.get('reviews', [])
         if not reviews:
@@ -103,14 +107,15 @@ class BERTopicAnalyzer(BaseAnalyzer):
         self._add_game_to_stopwords(json_data)
         
         # Preprocess documents with enhanced cleaning and tokenization
-        processed_docs = self._preprocess_documents(documents, language)
+        processed_docs = self._preprocess_documents(documents, language, appid)
         
         # Configure BERTopic model
         topic_model = self._create_topic_model(
             language=language,
             min_topic_size=min_topic_size,
             ngram_range=ngram_range,
-            top_n_words=top_n_words
+            top_n_words=top_n_words,
+            appid=appid
         )
         
         # Fit model and get topics
@@ -151,7 +156,7 @@ class BERTopicAnalyzer(BaseAnalyzer):
         
         return results
     
-    def _preprocess_documents(self, documents, language):
+    def _preprocess_documents(self, documents, language, appid):
         """
         Enhanced preprocessing for BERTopic with language-specific cleaning.
         
@@ -165,6 +170,7 @@ class BERTopicAnalyzer(BaseAnalyzer):
         Args:
             documents: List of review texts
             language: 'english' or 'schinese'
+            appid: Steam App ID for game-specific stopwords
         
         Returns:
             List of preprocessed documents
@@ -185,8 +191,8 @@ class BERTopicAnalyzer(BaseAnalyzer):
                 doc = re.sub(r'https?://\S+', '', doc)
                 doc = re.sub(r'[0-9]+', '', doc)  # Remove standalone numbers
             
-            # Step 3: Tokenize with stopword removal
-            tokens = self.text_processor.tokenize(doc, language, remove_stopwords=True)
+            # Step 3: Tokenize with stopword removal (game-specific)
+            tokens = self.text_processor.tokenize(doc, language, remove_stopwords=True, appid=appid)
             
             if len(tokens) < 3:  # Skip if too few meaningful tokens
                 continue
@@ -199,7 +205,7 @@ class BERTopicAnalyzer(BaseAnalyzer):
         
         return processed
     
-    def _create_topic_model(self, language, min_topic_size, ngram_range, top_n_words):
+    def _create_topic_model(self, language, min_topic_size, ngram_range, top_n_words, appid):
         """
         Create and configure BERTopic model.
         
@@ -244,7 +250,7 @@ class BERTopicAnalyzer(BaseAnalyzer):
         
         # Configure CountVectorizer for topic representation
         # Combine built-in stopwords with custom stopwords
-        stopwords = self.text_processor.get_stopwords(language)
+        stopwords = self.text_processor.get_stopwords(language, appid)
         custom_stopwords = self._get_combined_stopwords(language)
         
         if stopwords:

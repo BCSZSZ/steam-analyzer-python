@@ -243,11 +243,31 @@ class NgramAnalysisTab(BaseTab):
     
     def _save_popup_image(self, image):
         """Save word cloud image from popup."""
+        # Generate default filename from current results
+        import os
+        default_filename = "ngram_wordcloud.png"
+        if self.current_results:
+            from datetime import datetime
+            metadata = self.current_results.get('metadata', {})
+            game_name = self.current_results.get('game_name', '').replace(' ', '_').replace("'", '')
+            appid = metadata.get('appid', '')
+            params = self.current_results.get('analysis_params', {})
+            language = params.get('language', 'unknown')
+            sentiment = params.get('sentiment', 'all')
+            ngram_size = params.get('ngram_size', 2)
+            date_str = datetime.now().strftime('%Y-%m-%d')
+            
+            default_filename = f"{appid}_{game_name}_{language}_{sentiment}_{ngram_size}gram_wordcloud_{date_str}.png"
+        
+        # Use absolute path for initialdir
+        initial_dir = os.path.abspath("./data/processed")
+        
         filepath = filedialog.asksaveasfilename(
             title="Save Word Cloud Image",
             defaultextension=".png",
             filetypes=[("PNG Image", "*.png"), ("All Files", "*.*")],
-            initialdir="./data/processed"
+            initialdir=initial_dir,
+            initialfile=default_filename
         )
         
         if filepath:

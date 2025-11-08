@@ -63,6 +63,9 @@ class TextProcessor:
         
         # Load custom stopwords from file
         self.custom_stopwords = self._load_custom_stopwords()
+        
+        # Cache for stopwords by (language, appid) to avoid reloading
+        self._stopwords_cache = {}
     
     def _load_custom_stopwords(self):
         """Load custom stopwords from JSON file."""
@@ -80,16 +83,23 @@ class TextProcessor:
             print(f"[WARNING] Failed to load custom stopwords: {e}")
             return {'universal': [], 'game_specific': {}}
     
-    def get_stopwords(self, language: str):
+    def get_stopwords(self, language: str, appid: int = None):
         """
         Get stopwords for the specified language, including custom stopwords.
+        Uses caching to avoid reloading stopwords repeatedly.
         
         Args:
             language: 'english' or 'schinese'
+            appid: Optional game app ID to load game-specific stopwords
         
         Returns:
             Set of stopwords or None
         """
+        # Check cache first
+        cache_key = (language, appid)
+        if cache_key in self._stopwords_cache:
+            return self._stopwords_cache[cache_key]
+        
         # Get built-in stopwords
         if language == 'english':
             stopwords = set(self.ENGLISH_STOPWORDS)
@@ -102,15 +112,27 @@ class TextProcessor:
         universal = self.custom_stopwords.get('universal', [])
         stopwords.update(universal)
         
-        # Add all game-specific stopwords (both English and CN)
-        game_specific = self.custom_stopwords.get('game_specific', {})
-        for game_terms in game_specific.values():
-            if isinstance(game_terms, list):
-                stopwords.update(game_terms)
-            elif isinstance(game_terms, str) and game_terms.strip():
-                # Handle string format: "term1, term2, term3"
-                terms = [t.strip() for t in game_terms.split(',') if t.strip()]
-                stopwords.update(terms)
+        # Add game-specific stopwords ONLY for the current game
+        if appid is not None:
+            game_specific = self.custom_stopwords.get('game_specific', {})
+            
+            # Try to find matching keys for this appid
+            # Keys format: {appid}_{gamename} or {appid}_{gamename}_CN
+            suffix = '_CN' if language == 'schinese' else ''
+            
+            for key, terms in game_specific.items():
+                # Check if key starts with the appid
+                if key.startswith(f"{appid}_") and key.endswith(suffix):
+                    if isinstance(terms, list):
+                        stopwords.update(terms)
+                    elif isinstance(terms, str) and terms.strip():
+                        # Handle string format: "term1, term2, term3"
+                        term_list = [t.strip() for t in terms.split(',') if t.strip()]
+                        stopwords.update(term_list)
+                    print(f"[STOPWORDS] Loaded {len(terms)} game-specific terms from key: {key}")
+        
+        # Cache the result
+        self._stopwords_cache[cache_key] = stopwords
         
         return stopwords
     
@@ -141,13 +163,14 @@ class TextProcessor:
         
         return text.strip()
     
-    def tokenize_english(self, text: str, remove_stopwords: bool = True) -> List[str]:
+    def tokenize_english(self, text: str, remove_stopwords: bool = True, appid: int = None) -> List[str]:
         """
         Tokenize English text into words.
         
         Args:
             text: Cleaned English text
             remove_stopwords: Whether to remove common stopwords
+            appid: Optional game app ID for game-specific stopwords
             
         Returns:
             List of tokens (lowercase words)
@@ -168,17 +191,19 @@ class TextProcessor:
         
         # Remove stopwords if requested
         if remove_stopwords:
-            tokens = [t for t in tokens if t not in self.ENGLISH_STOPWORDS]
+            stopwords = self.get_stopwords('english', appid)
+            tokens = [t for t in tokens if t not in stopwords]
         
         return tokens
     
-    def tokenize_chinese(self, text: str, remove_stopwords: bool = True) -> List[str]:
+    def tokenize_chinese(self, text: str, remove_stopwords: bool = True, appid: int = None) -> List[str]:
         """
         Tokenize Chinese text using jieba segmentation.
         
         Args:
             text: Cleaned Chinese text
             remove_stopwords: Whether to remove common stopwords
+            appid: Optional game app ID for game-specific stopwords
             
         Returns:
             List of tokens (Chinese words/phrases)
@@ -200,11 +225,12 @@ class TextProcessor:
         
         # Remove stopwords if requested
         if remove_stopwords:
-            tokens = [t for t in tokens if t not in self.CHINESE_STOPWORDS]
+            stopwords = self.get_stopwords('schinese', appid)
+            tokens = [t for t in tokens if t not in stopwords]
         
         return tokens
     
-    def tokenize(self, text: str, language: str, remove_stopwords: bool = True) -> List[str]:
+    def tokenize(self, text: str, language: str, remove_stopwords: bool = True, appid: int = None) -> List[str]:
         """
         Tokenize text based on language.
         
@@ -212,6 +238,7 @@ class TextProcessor:
             text: Text to tokenize
             language: 'english' or 'schinese' (Simplified Chinese)
             remove_stopwords: Whether to remove stopwords
+            appid: Optional game app ID for game-specific stopwords
             
         Returns:
             List of tokens
@@ -219,9 +246,9 @@ class TextProcessor:
         cleaned = self.clean_text(text)
         
         if language == 'english':
-            return self.tokenize_english(cleaned, remove_stopwords)
+            return self.tokenize_english(cleaned, remove_stopwords, appid)
         elif language == 'schinese':
-            return self.tokenize_chinese(cleaned, remove_stopwords)
+            return self.tokenize_chinese(cleaned, remove_stopwords, appid)
         else:
             # Fallback to simple whitespace tokenization
             return cleaned.lower().split()

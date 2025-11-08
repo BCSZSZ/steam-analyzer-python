@@ -98,8 +98,8 @@ class NgramAnalyzer(BaseAnalyzer):
             if not review_text:
                 continue
             
-            # Tokenize text
-            tokens = self.text_processor.tokenize(review_text, language, remove_stopwords=True)
+            # Tokenize text (pass appid for game-specific stopwords)
+            tokens = self.text_processor.tokenize(review_text, language, remove_stopwords=True, appid=appid)
             
             # Generate n-grams (with repetitive n-gram filtering for n >= 2)
             # This filters out patterns like ('难评', '难评') or ('peak', 'peak')

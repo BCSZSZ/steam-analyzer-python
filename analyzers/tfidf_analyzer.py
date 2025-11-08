@@ -111,7 +111,7 @@ class TfidfAnalyzer(BaseAnalyzer):
             
             # Preprocess: tokenize and join back (for TF-IDF vectorizer)
             # Both English and Chinese need space-separated tokens for TF-IDF
-            tokens = self.text_processor.tokenize(review_text, language, remove_stopwords=True)
+            tokens = self.text_processor.tokenize(review_text, language, remove_stopwords=True, appid=appid)
             processed_text = ' '.join(tokens)
             
             if not processed_text:
