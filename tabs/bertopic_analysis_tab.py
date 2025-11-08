@@ -9,7 +9,6 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import json
 import threading
-from analyzers.bertopic_analyzer import BERTopicAnalyzer
 from .base_tab import BaseTab
 import webbrowser
 import tempfile
@@ -255,7 +254,7 @@ class BERTopicAnalysisTab(BaseTab):
         # Store state
         self.current_data = None
         self.current_results = None
-        self.analyzer = BERTopicAnalyzer()
+        self.analyzer = None  # Lazy load when needed
     
     def load_raw_json(self):
         """Load raw review JSON file."""
@@ -273,6 +272,13 @@ class BERTopicAnalysisTab(BaseTab):
             
             self.current_data = json_data
             self.current_results = None
+            
+            # Get available languages (without loading BERTopic)
+            reviews = json_data.get('reviews', [])
+            languages = sorted(list(set(r.get('language') for r in reviews if r.get('language'))))
+            languages.insert(0, 'all')
+            self.lang_combo.config(values=languages)
+            self.language_var.set('all')
             
             # Update UI
             metadata = json_data.get('metadata', {})
@@ -297,6 +303,21 @@ class BERTopicAnalysisTab(BaseTab):
         if not self.current_data:
             messagebox.showwarning("No Data", "Please load a JSON file first.")
             return
+        
+        # Lazy load BERTopicAnalyzer on first use
+        if self.analyzer is None:
+            print("[LAZY LOAD] Loading BERTopic libraries...")
+            self.status_label.config(text="Loading BERTopic libraries (first time only)...", foreground='blue')
+            self.frame.update()
+            try:
+                from analyzers.bertopic_analyzer import BERTopicAnalyzer
+                self.analyzer = BERTopicAnalyzer()
+                print("[LAZY LOAD] BERTopic libraries loaded successfully")
+            except Exception as e:
+                messagebox.showerror("Load Error", f"Failed to load BERTopic libraries:\n{e}")
+                self.status_label.config(text="", foreground='blue')
+                self.analyze_btn.config(state='normal')
+                return
         
         # Get parameters
         language = self.language_var.get()
@@ -533,7 +554,8 @@ class BERTopicAnalysisTab(BaseTab):
         """Clear loaded data and results."""
         self.current_data = None
         self.current_results = None
-        self.analyzer = BERTopicAnalyzer()
+        # Don't reload analyzer, keep it loaded if already loaded
+        # self.analyzer remains as is (None or loaded)
         
         self.data_info_label.config(text="No data loaded", foreground='gray')
         self.summary_label.config(text="No analysis performed yet", foreground='gray')

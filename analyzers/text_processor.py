@@ -60,10 +60,29 @@ class TextProcessor:
         """Initialize the text processor."""
         # Preload jieba for better performance
         jieba.initialize()
+        
+        # Load custom stopwords from file
+        self.custom_stopwords = self._load_custom_stopwords()
+    
+    def _load_custom_stopwords(self):
+        """Load custom stopwords from JSON file."""
+        import json
+        import os
+        
+        stopwords_file = 'data/stopwords.json'
+        if not os.path.exists(stopwords_file):
+            return {'universal': [], 'game_specific': {}}
+        
+        try:
+            with open(stopwords_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"[WARNING] Failed to load custom stopwords: {e}")
+            return {'universal': [], 'game_specific': {}}
     
     def get_stopwords(self, language: str):
         """
-        Get stopwords for the specified language.
+        Get stopwords for the specified language, including custom stopwords.
         
         Args:
             language: 'english' or 'schinese'
@@ -71,12 +90,29 @@ class TextProcessor:
         Returns:
             Set of stopwords or None
         """
+        # Get built-in stopwords
         if language == 'english':
-            return self.ENGLISH_STOPWORDS
+            stopwords = set(self.ENGLISH_STOPWORDS)
         elif language == 'schinese':
-            return self.CHINESE_STOPWORDS
+            stopwords = set(self.CHINESE_STOPWORDS)
         else:
             return None
+        
+        # Add universal custom stopwords
+        universal = self.custom_stopwords.get('universal', [])
+        stopwords.update(universal)
+        
+        # Add all game-specific stopwords (both English and CN)
+        game_specific = self.custom_stopwords.get('game_specific', {})
+        for game_terms in game_specific.values():
+            if isinstance(game_terms, list):
+                stopwords.update(game_terms)
+            elif isinstance(game_terms, str) and game_terms.strip():
+                # Handle string format: "term1, term2, term3"
+                terms = [t.strip() for t in game_terms.split(',') if t.strip()]
+                stopwords.update(terms)
+        
+        return stopwords
     
     def clean_text(self, text: str) -> str:
         """

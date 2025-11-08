@@ -48,6 +48,9 @@ class DataCollectionTab(BaseTab):
 
         self.fetch_button = ttk.Button(input_frame, text="Fetch & Analyze", command=self.start_analysis_thread)
         self.fetch_button.pack(side=tk.LEFT, padx=10)
+        
+        self.resume_button = ttk.Button(input_frame, text="Resume from Checkpoint", command=self.resume_from_checkpoint)
+        self.resume_button.pack(side=tk.LEFT, padx=5)
 
         self.analyze_json_button = ttk.Button(input_frame, text="Analyze from JSON", command=self.start_json_analysis_thread)
         self.analyze_json_button.pack(side=tk.LEFT, padx=5)
@@ -269,8 +272,8 @@ class DataCollectionTab(BaseTab):
         """
         Initiate review fetching and analysis in a background thread.
         
-        Validates input, checks for resume capability, and spawns a worker thread
-        to avoid blocking the UI during long-running operations.
+        Validates input and spawns a worker thread to avoid blocking the UI 
+        during long-running operations.
         """
         try:
             appid = int(self.appid_entry.get())
@@ -285,22 +288,101 @@ class DataCollectionTab(BaseTab):
             messagebox.showerror("Invalid Input", "Please enter a valid number for App ID.")
             return
         
-        # Check for checkpoint file to enable resume
+        # Start fresh download (no resume)
         self.app.cancel_event.clear()
-        resume = False
-        checkpoint_path = os.path.join(backend.TEMP_FOLDER, f"{appid}_checkpoint.json")
-        if os.path.exists(checkpoint_path):
-            if messagebox.askyesno("Resume Download?", f"An incomplete download was found for App ID {appid}. Would you like to resume?"):
-                resume = True
         
         self.fetch_button.config(state=tk.DISABLED)
+        self.resume_button.config(state=tk.DISABLED)
         self.import_button.config(state=tk.DISABLED)
         self.analyze_json_button.config(state=tk.DISABLED)
         self.cancel_button.config(state=tk.NORMAL)
         self.tree.delete(*self.tree.get_children())
         
-        thread = threading.Thread(target=self.run_backend_job, args=(appid, max_pages, resume, game_title), daemon=True)
+        thread = threading.Thread(target=self.run_backend_job, args=(appid, max_pages, False, game_title), daemon=True)
         thread.start()
+    
+    def resume_from_checkpoint(self):
+        """
+        Resume a download from a selected checkpoint file.
+        
+        Opens file picker to select checkpoint file, then resumes the download.
+        """
+        # Open file picker for checkpoint file
+        checkpoint_path = filedialog.askopenfilename(
+            title="Select Checkpoint File",
+            initialdir=backend.TEMP_FOLDER,
+            filetypes=[("Checkpoint files", "*_checkpoint.json"), ("All files", "*.*")]
+        )
+        
+        if not checkpoint_path:
+            return  # User cancelled
+        
+        try:
+            # Load checkpoint to get appid
+            with open(checkpoint_path, 'r', encoding='utf-8') as f:
+                checkpoint_data = json.load(f)
+                appid = checkpoint_data.get('appid')
+                if not appid:
+                    messagebox.showerror("Invalid Checkpoint", "Checkpoint file does not contain appid.")
+                    return
+            
+            game_title = utils.get_game_name(appid)
+            
+            # Update UI with appid
+            self.appid_entry.delete(0, tk.END)
+            self.appid_entry.insert(0, str(appid))
+            
+            # Start resume
+            self.app.cancel_event.clear()
+            
+            self.fetch_button.config(state=tk.DISABLED)
+            self.resume_button.config(state=tk.DISABLED)
+            self.import_button.config(state=tk.DISABLED)
+            self.analyze_json_button.config(state=tk.DISABLED)
+            self.cancel_button.config(state=tk.NORMAL)
+            self.tree.delete(*self.tree.get_children())
+            
+            # Store checkpoint path for backend to use
+            # Pass max_pages as None since we're resuming
+            thread = threading.Thread(
+                target=self.run_backend_job_with_checkpoint, 
+                args=(checkpoint_path, game_title), 
+                daemon=True
+            )
+            thread.start()
+            
+        except (json.JSONDecodeError, IOError) as e:
+            messagebox.showerror("Error", f"Failed to load checkpoint file: {e}")
+
+    def run_backend_job_with_checkpoint(self, checkpoint_path, game_title):
+        """
+        Background worker that resumes from a specific checkpoint file.
+        
+        Args:
+            checkpoint_path: Path to checkpoint file
+            game_title: Game name for report generation
+        """
+        try:
+            # Load checkpoint data
+            with open(checkpoint_path, 'r', encoding='utf-8') as f:
+                checkpoint_data = json.load(f)
+            
+            appid = checkpoint_data.get('appid')
+            
+            # Call backend with resume=True
+            scraped_data = backend.get_all_steam_reviews(
+                appid, status_queue=self.app.status_queue, max_pages=None,
+                cancel_event=self.app.cancel_event, resume=True
+            )
+            
+            if scraped_data:
+                backend.save_reviews_to_json(scraped_data, self.app.status_queue)
+                report_data = backend.analyze_and_save_report(scraped_data, self.app.status_queue, game_title=game_title)
+                self.app.status_queue.put(("complete", scraped_data, report_data))
+        except Exception as e:
+            self.app.status_queue.put(f"Error during resume: {e}")
+        finally:
+            self.app.status_queue.put("done")
 
     def run_backend_job(self, appid, max_pages, resume, game_title):
         """

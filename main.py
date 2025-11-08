@@ -3,20 +3,24 @@ Steam Review Analysis Tool - Main Application
 Multi-tab GUI for fetching, analyzing, and visualizing Steam review data.
 """
 
+print("[STARTUP] Initializing Steam Review Analyzer...")
+print("[STARTUP] Loading core libraries...")
+
 import tkinter as tk
 from tkinter import ttk
 import queue
 import threading
 
 # Import tab modules
+print("[STARTUP] Loading tab modules...")
 from tabs.data_collection_tab import DataCollectionTab
 from tabs.extreme_reviews_tab import ExtremeReviewsTab
-from tabs.text_insights_tab import TextInsightsTab
 from tabs.ngram_analysis_tab import NgramAnalysisTab
 from tabs.tfidf_analysis_tab import TfidfAnalysisTab
 from tabs.timeline_analysis_tab import TimelineAnalysisTab
 from tabs.bertopic_analysis_tab import BERTopicAnalysisTab
-from tabs.bertopic_stopwords_tab import BERTopicStopwordsTab
+from tabs.bertopic_stopwords_tab import BERTopicStopwordsTab  # TODO: Rename to StopwordsManagerTab
+print("[STARTUP] Tab modules loaded")
 
 
 class SteamReviewApp:
@@ -35,21 +39,29 @@ class SteamReviewApp:
         self.cancel_event = threading.Event()
         
         # Create notebook (tabbed interface)
+        print("[STARTUP] Initializing GUI framework...")
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # Create tabs
+        print("[STARTUP] Creating Data Collection tab...")
         self.data_collection_tab = DataCollectionTab(self.notebook, self)
+        print("[STARTUP] Creating Extreme Reviews tab...")
         self.extreme_reviews_tab = ExtremeReviewsTab(self.notebook, self)
-        self.text_insights_tab = TextInsightsTab(self.notebook, self)
+        print("[STARTUP] Creating N-gram Analysis tab...")
         self.ngram_analysis_tab = NgramAnalysisTab(self.notebook, self)
+        print("[STARTUP] Creating TF-IDF Analysis tab...")
         self.tfidf_analysis_tab = TfidfAnalysisTab(self.notebook, self)
+        print("[STARTUP] Creating Timeline Analysis tab...")
         self.timeline_analysis_tab = TimelineAnalysisTab(self.notebook, self)
+        print("[STARTUP] Creating BERTopic Analysis tab (lazy load)...")
         self.bertopic_analysis_tab = BERTopicAnalysisTab(self.notebook, self)
+        print("[STARTUP] Creating Stopwords Editor tab...")
         self.bertopic_stopwords_tab = BERTopicStopwordsTab(self.notebook, self)
         
         # Start queue processing
         self.process_queue()
+        print("[STARTUP] Application ready!")
 
     def process_queue(self):
         """Process messages from the status queue."""
@@ -62,6 +74,7 @@ class SteamReviewApp:
                     self.data_collection_tab.update_info_display(message['metadata'], reviews=message.get('reviews'))
                 elif msg_type == 'done':
                     self.data_collection_tab.fetch_button.config(state=tk.NORMAL)
+                    self.data_collection_tab.resume_button.config(state=tk.NORMAL)
                     self.data_collection_tab.import_button.config(state=tk.NORMAL)
                     self.data_collection_tab.analyze_json_button.config(state=tk.NORMAL)
                     self.data_collection_tab.cancel_button.config(state=tk.DISABLED)

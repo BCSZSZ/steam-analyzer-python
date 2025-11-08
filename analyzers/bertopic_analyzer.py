@@ -36,7 +36,7 @@ class BERTopicAnalyzer(BaseAnalyzer):
         self.text_processor = TextProcessor()
         self.topic_model = None
         self.embeddings = None
-        self.stopwords_file = 'data/bertopic_stopwords.json'
+        self.stopwords_file = 'data/stopwords.json'
         self.custom_stopwords = self._load_stopwords()
     
     def analyze(self, json_data, language='english', min_topic_size=10, 

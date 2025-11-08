@@ -71,6 +71,78 @@ def get_recent_review_summary(appid: int) -> Optional[Dict[str, int]]:
         print(f"Error fetching review summary: {e}")
     return None
 
+def _save_checkpoint_and_data(appid, all_reviews, cursor, start_time, target_count, 
+                              page_count, total_reviews_available, raw_data_filename, 
+                              checkpoint_filename, status_queue):
+    """
+    Helper function to save checkpoint and raw data files.
+    Updates filenames with current count and renames existing files.
+    """
+    # Generate/update filenames
+    if not raw_data_filename:
+        # First checkpoint - create initial filenames
+        date_str = start_time.strftime('%Y-%m-%d')
+        time_str = start_time.strftime('%H-%M-%S')
+        target = target_count if target_count else (total_reviews_available if total_reviews_available else 0)
+        raw_data_filename = f"{appid}_{date_str}_{time_str}_{target}_{len(all_reviews)}_reviews.json"
+        checkpoint_filename = f"{appid}_{date_str}_{time_str}_{target}_{len(all_reviews)}_checkpoint.json"
+    else:
+        # Update filenames with new current count
+        old_raw_filename = raw_data_filename
+        old_checkpoint_filename = checkpoint_filename
+        
+        # Extract parts and update count
+        parts = raw_data_filename.rsplit('_', 2)
+        base = parts[0]  # appid_date_time_targetcount
+        raw_data_filename = f"{base}_{len(all_reviews)}_reviews.json"
+        checkpoint_filename = f"{base}_{len(all_reviews)}_checkpoint.json"
+        
+        # Rename old files if they exist
+        old_raw_path = os.path.join(JSON_FOLDER, old_raw_filename)
+        new_raw_path = os.path.join(JSON_FOLDER, raw_data_filename)
+        if os.path.exists(old_raw_path) and old_raw_path != new_raw_path:
+            os.rename(old_raw_path, new_raw_path)
+        
+        old_checkpoint_path = os.path.join(TEMP_FOLDER, old_checkpoint_filename)
+        new_checkpoint_path = os.path.join(TEMP_FOLDER, checkpoint_filename)
+        if os.path.exists(old_checkpoint_path) and old_checkpoint_path != new_checkpoint_path:
+            os.rename(old_checkpoint_path, new_checkpoint_path)
+    
+    # Save checkpoint file
+    os.makedirs(TEMP_FOLDER, exist_ok=True)
+    checkpoint_path = os.path.join(TEMP_FOLDER, checkpoint_filename)
+    final_target = target_count if target_count else (total_reviews_available if total_reviews_available else len(all_reviews))
+    checkpoint_data = {
+        'cursor': cursor,
+        'raw_data_filename': raw_data_filename,
+        'appid': appid,
+        'target_count': final_target,
+        'current_count': len(all_reviews),
+        'start_time': start_time.isoformat()
+    }
+    with open(checkpoint_path, 'w', encoding='utf-8') as f:
+        json.dump(checkpoint_data, f, ensure_ascii=False, indent=2)
+    
+    # Save raw data file
+    os.makedirs(JSON_FOLDER, exist_ok=True)
+    raw_data_path = os.path.join(JSON_FOLDER, raw_data_filename)
+    raw_data = {
+        'metadata': {
+            'appid': appid,
+            'total_reviews_collected': len(all_reviews),
+            'pages_fetched': page_count,
+            'date_collected_utc': datetime.utcnow().isoformat(),
+            'target_count': final_target,
+            'start_time': start_time.isoformat()
+        },
+        'reviews': all_reviews
+    }
+    with open(raw_data_path, 'w', encoding='utf-8') as f:
+        json.dump(raw_data, f, ensure_ascii=False, indent=2)
+    
+    return raw_data_filename, checkpoint_filename
+
+
 def get_all_steam_reviews(
     appid: int, 
     status_queue, 
@@ -94,23 +166,46 @@ def get_all_steam_reviews(
     Returns:
         Dictionary with 'metadata' and 'reviews' keys, or None if cancelled
     """
-    checkpoint_path = os.path.join(TEMP_FOLDER, f"{appid}_checkpoint.json")
     all_reviews: List[Dict[str, Any]] = []
     cursor = '*'
+    start_time = datetime.now()
+    raw_data_filename = None
+    checkpoint_filename = None
+    target_count = None
+    
+    # Find existing checkpoint file for this appid (if any)
+    checkpoint_path = None
+    if resume:
+        checkpoint_files = [f for f in os.listdir(TEMP_FOLDER) if f.startswith(f"{appid}_") and f.endswith('_checkpoint.json')]
+        if checkpoint_files:
+            # Use the most recent checkpoint
+            checkpoint_path = os.path.join(TEMP_FOLDER, checkpoint_files[0])
     
     # Load checkpoint if resuming
-    if resume and os.path.exists(checkpoint_path):
+    if resume and checkpoint_path and os.path.exists(checkpoint_path):
         try:
             with open(checkpoint_path, 'r', encoding='utf-8') as f:
                 checkpoint_data = json.load(f)
-                all_reviews = checkpoint_data.get('reviews', [])
-                cursor = checkpoint_data.get('next_cursor', '*')
+                cursor = checkpoint_data.get('cursor', '*')
+                raw_data_filename = checkpoint_data.get('raw_data_filename')
+                target_count = checkpoint_data.get('target_count')
+                start_time_str = checkpoint_data.get('start_time')
+                if start_time_str:
+                    start_time = datetime.fromisoformat(start_time_str)
+                
+                # Load existing reviews from raw data file
+                if raw_data_filename:
+                    raw_data_path = os.path.join(JSON_FOLDER, raw_data_filename)
+                    if os.path.exists(raw_data_path):
+                        with open(raw_data_path, 'r', encoding='utf-8') as rf:
+                            existing_data = json.load(rf)
+                            all_reviews = existing_data.get('reviews', [])
                 status_queue.put(f"Resuming download from {len(all_reviews)} reviews.")
         except (IOError, json.JSONDecodeError) as e:
             status_queue.put(f"Could not load checkpoint: {e}. Starting fresh.")
             all_reviews, cursor = [], '*'
-    elif os.path.exists(checkpoint_path):
-        os.remove(checkpoint_path)
+            start_time = datetime.now()
+            raw_data_filename = None
 
     # API request parameters
     # filter='recent' fetches ALL reviews sorted by creation time (including never-edited reviews)
@@ -128,28 +223,32 @@ def get_all_steam_reviews(
 
     # Pagination loop - continues until max_pages reached or no more reviews
     print(f"[DEBUG] Starting pagination loop. max_pages={max_pages}")
-    consecutive_empty_pages = 0
-    max_empty_pages = 10
     total_reviews_available = None  # Will be set from first API response
     
     while not (max_pages is not None and page_count >= max_pages):
         if cancel_event.is_set():
+            # Save checkpoint on cancellation
+            _save_checkpoint_and_data(appid, all_reviews, cursor, start_time, target_count, 
+                                     page_count, total_reviews_available, raw_data_filename, 
+                                     checkpoint_filename, status_queue)
             status_queue.put("Download cancelled by user.")
             print(f"[DEBUG] Loop exit: User cancellation")
-            break
+            return None
         
         params['cursor'] = cursor
         try:
             query_string = urllib.parse.urlencode({k: v for k, v in params.items() if k not in ['delay_seconds', 'max_pages']})
             request_url = f"{url}?{query_string}"
-            status_queue.put(f"Fetching page {page_count + 1}. ({len(all_reviews)} reviews collected)")
+            
+            # Record request start time
+            request_start = time.time()
 
             response = requests.get(request_url, timeout=10)
             response.raise_for_status()
             data = response.json()
             
-            # Log API response details
-            print(f"[DEBUG] Page {page_count + 1}: API success={data.get('success')}")
+            # Calculate request duration
+            request_duration = time.time() - request_start
             
             if data.get('success') != 1:
                 status_queue.put(f"API call failed. Success code: {data.get('success')}")
@@ -168,112 +267,145 @@ def get_all_steam_reviews(
                     print(f"[INFO] Total reviews available according to API: {total_reviews_available:,}")
                     status_queue.put(f"API reports {total_reviews_available:,} total reviews available")
             
-            print(f"[DEBUG] Reviews in response: {len(reviews)}")
-            print(f"[DEBUG] Query summary: {query_summary}")
-            print(f"[DEBUG] Current cursor: {cursor[:50]}..." if len(cursor) > 50 else f"[DEBUG] Current cursor: {cursor}")
-            print(f"[DEBUG] Next cursor: {next_cursor[:50]}..." if next_cursor and len(next_cursor) > 50 else f"[DEBUG] Next cursor: {next_cursor}")
-            print(f"[DEBUG] Cursor changed: {next_cursor != cursor}")
+            # Consolidated fetch log per page
+            reviews_count = len(reviews)
+            total_count = len(all_reviews) + reviews_count
+            if total_reviews_available:
+                progress_pct = (total_count / total_reviews_available * 100)
+                status_indicator = "OK" if reviews_count > 0 else "EMPTY"
+                print(f"[FETCH] Page {page_count + 1} | Reviews: +{reviews_count} (Total: {total_count:,} / {total_reviews_available:,} = {progress_pct:.1f}%) | Time: {request_duration:.2f}s | Status: {status_indicator} | Cursor: {next_cursor}")
+            else:
+                status_indicator = "OK" if reviews_count > 0 else "EMPTY"
+                print(f"[FETCH] Page {page_count + 1} | Reviews: +{reviews_count} (Total: {total_count:,}) | Time: {request_duration:.2f}s | Status: {status_indicator} | Cursor: {next_cursor}")
             
-            # Check if we should stop: empty reviews AND (no cursor change OR no cursor)
+            # Log target confirmation on first page
+            if page_count == 0 and total_reviews_available:
+                print(f"[FETCH] Target confirmed: {total_reviews_available:,} total reviews available")
+            
+            # Check if we should stop: empty reviews
             if not reviews:
-                consecutive_empty_pages += 1
-                print(f"[DEBUG] Empty page encountered ({consecutive_empty_pages}/{max_empty_pages})")
+                print(f"[FETCH] Page {page_count + 1} | Empty page encountered - stopping")
                 
                 # Check if we've collected all available reviews
                 if total_reviews_available and len(all_reviews) >= total_reviews_available:
                     status_queue.put(f"Finished: Collected all {len(all_reviews):,} reviews (matched total available)")
-                    print(f"[DEBUG] Loop exit: Collected all available reviews ({len(all_reviews):,}/{total_reviews_available:,})")
-                    break
-                
-                # Stop if cursor didn't change
-                if not next_cursor or next_cursor == cursor:
-                    status_queue.put("Finished: No more reviews returned.")
-                    print(f"[DEBUG] Loop exit: Empty reviews array AND cursor unchanged/null")
-                    print(f"[DEBUG] Total collected: {len(all_reviews):,} reviews")
-                    if total_reviews_available:
-                        print(f"[DEBUG] Expected {total_reviews_available:,}, got {len(all_reviews):,} ({len(all_reviews)/total_reviews_available*100:.1f}%)")
-                    print(f"[DEBUG] Query summary at stop: {query_summary}")
-                    break
-                
-                # Stop if too many consecutive empty pages
-                if consecutive_empty_pages >= max_empty_pages:
-                    status_queue.put(f"Finished: {max_empty_pages} consecutive empty pages - assuming end of data")
-                    print(f"[DEBUG] Loop exit: Too many consecutive empty pages ({consecutive_empty_pages})")
-                    print(f"[DEBUG] Total collected: {len(all_reviews):,} reviews")
-                    if total_reviews_available:
-                        print(f"[DEBUG] Expected {total_reviews_available:,}, got {len(all_reviews):,} ({len(all_reviews)/total_reviews_available*100:.1f}%)")
-                    break
-                
-                # Empty reviews but cursor changed - might be a gap, continue
-                print(f"[DEBUG] WARNING: Empty reviews but cursor changed - continuing (possible data gap)")
-                status_queue.put(f"Warning: Empty page {page_count + 1}, but cursor changed. Continuing... ({consecutive_empty_pages}/{max_empty_pages})")
-                page_count += 1
-                cursor = next_cursor
-                if delay_seconds > 0:
-                    print(f"[DEBUG] Sleeping {delay_seconds} seconds before next request")
-                    time.sleep(delay_seconds)
-                print(f"[DEBUG] Continuing to next page after empty response...")
-                continue
+                    print(f"[FETCH] Complete | All reviews collected ({len(all_reviews):,}/{total_reviews_available:,})")
+                else:
+                    # Save checkpoint before stopping
+                    raw_data_filename, checkpoint_filename = _save_checkpoint_and_data(
+                        appid, all_reviews, cursor, start_time, target_count, 
+                        page_count, total_reviews_available, raw_data_filename, 
+                        checkpoint_filename, status_queue)
+                    status_queue.put(f"Empty page encountered. Checkpoint saved ({len(all_reviews):,} reviews).")
+                    print(f"[FETCH] Checkpoint saved | {len(all_reviews):,} reviews | Can resume")
+                break
 
-            # Reset empty page counter when we get reviews
-            consecutive_empty_pages = 0
+            # Got reviews - add them to collection
             all_reviews.extend(reviews)
             page_count += 1
-            print(f"[DEBUG] Total reviews so far: {len(all_reviews):,}")
             
             # Check if we've reached the total available reviews
             if total_reviews_available and len(all_reviews) >= total_reviews_available:
                 status_queue.put(f"Finished: Collected all {len(all_reviews):,} reviews")
-                print(f"[DEBUG] Loop exit: Reached total available reviews ({len(all_reviews):,}/{total_reviews_available:,})")
+                print(f"[FETCH] Complete | All {len(all_reviews):,} reviews collected")
                 break
 
             if next_cursor and next_cursor != cursor:
                 cursor = next_cursor
                 # Save checkpoint every N pages for resume capability
                 if page_count % CHECKPOINT_INTERVAL_PAGES == 0:
-                    os.makedirs(TEMP_FOLDER, exist_ok=True)
-                    with open(checkpoint_path, 'w', encoding='utf-8') as f:
-                        json.dump({'reviews': all_reviews, 'next_cursor': cursor}, f)
-                    status_queue.put(f"Milestone saved ({len(all_reviews)} reviews).")
+                    raw_data_filename, checkpoint_filename = _save_checkpoint_and_data(
+                        appid, all_reviews, cursor, start_time, target_count, 
+                        page_count, total_reviews_available, raw_data_filename, 
+                        checkpoint_filename, status_queue)
+                    print(f"[FETCH] Checkpoint saved at page {page_count} | {len(all_reviews):,} reviews")
+                    status_queue.put(f"Checkpoint saved ({len(all_reviews)} reviews).")
                 
                 if delay_seconds > 0: 
-                    print(f"[DEBUG] Sleeping {delay_seconds} seconds before next request")
                     time.sleep(delay_seconds)
-                print(f"[DEBUG] Continuing to next page...")
             else:
                 status_queue.put("Finished: No new cursor returned.")
-                print(f"[DEBUG] Loop exit: Cursor unchanged or null")
-                print(f"[DEBUG] next_cursor={next_cursor}, current_cursor={cursor[:50] if cursor and len(cursor) > 50 else cursor}")
-                print(f"[DEBUG] Total collected: {len(all_reviews)} reviews")
+                print(f"[FETCH] Stopped | No new cursor | Total: {len(all_reviews):,} reviews")
                 break
+        except requests.exceptions.Timeout as e:
+            # Network timeout - save checkpoint
+            status_queue.put(f"Network timeout occurred. Saving checkpoint...")
+            print(f"[FETCH] ERROR | Timeout on page {page_count + 1} | Exception: {e}")
+            raw_data_filename, checkpoint_filename = _save_checkpoint_and_data(
+                appid, all_reviews, cursor, start_time, target_count, 
+                page_count, total_reviews_available, raw_data_filename, 
+                checkpoint_filename, status_queue)
+            print(f"[FETCH] Checkpoint saved | {len(all_reviews):,} reviews | Can resume")
+            status_queue.put(f"Checkpoint saved due to timeout. You can resume later.")
+            break
+        except requests.exceptions.ConnectionError as e:
+            # Connection error - save checkpoint
+            status_queue.put(f"Connection error occurred. Saving checkpoint...")
+            print(f"[FETCH] ERROR | Connection error on page {page_count + 1} | Exception: {e}")
+            raw_data_filename, checkpoint_filename = _save_checkpoint_and_data(
+                appid, all_reviews, cursor, start_time, target_count, 
+                page_count, total_reviews_available, raw_data_filename, 
+                checkpoint_filename, status_queue)
+            print(f"[FETCH] Checkpoint saved | {len(all_reviews):,} reviews | Can resume")
+            status_queue.put(f"Checkpoint saved due to connection error. You can resume later.")
+            break
         except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
-            status_queue.put(f"An error occurred: {e}")
-            print(f"[DEBUG] Loop exit: Exception - {type(e).__name__}: {e}")
+            # Other request/JSON errors - save checkpoint
+            status_queue.put(f"An error occurred. Saving checkpoint...")
+            print(f"[FETCH] ERROR | {type(e).__name__} on page {page_count + 1} | Exception: {e}")
+            raw_data_filename, checkpoint_filename = _save_checkpoint_and_data(
+                appid, all_reviews, cursor, start_time, target_count, 
+                page_count, total_reviews_available, raw_data_filename, 
+                checkpoint_filename, status_queue)
+            print(f"[FETCH] Checkpoint saved | {len(all_reviews):,} reviews | Can resume")
+            status_queue.put(f"Checkpoint saved due to error. You can resume later.")
             break
     
     print(f"[DEBUG] Exited pagination loop. Final count: {len(all_reviews)} reviews, pages: {page_count}")
     
+    # Generate final filenames if not already created
+    if not raw_data_filename:
+        date_str = start_time.strftime('%Y-%m-%d')
+        time_str = start_time.strftime('%H-%M-%S')
+        final_target = target_count if target_count else (total_reviews_available if total_reviews_available else len(all_reviews))
+        raw_data_filename = f"{appid}_{date_str}_{time_str}_{final_target}_{len(all_reviews)}_reviews.json"
+        checkpoint_filename = f"{appid}_{date_str}_{time_str}_{final_target}_{len(all_reviews)}_checkpoint.json"
+    else:
+        # Update filenames with final count
+        old_raw_filename = raw_data_filename
+        old_checkpoint_filename = checkpoint_filename
+        
+        parts = raw_data_filename.rsplit('_', 2)
+        base = parts[0]
+        raw_data_filename = f"{base}_{len(all_reviews)}_reviews.json"
+        checkpoint_filename = f"{base}_{len(all_reviews)}_checkpoint.json"
+        
+        # Rename old files if they exist
+        old_raw_path = os.path.join(JSON_FOLDER, old_raw_filename)
+        new_raw_path = os.path.join(JSON_FOLDER, raw_data_filename)
+        if os.path.exists(old_raw_path) and old_raw_path != new_raw_path:
+            os.rename(old_raw_path, new_raw_path)
+    
     # Package collected data with metadata
+    final_target = target_count if target_count else (total_reviews_available if total_reviews_available else len(all_reviews))
     final_data = {
         'metadata': {
             'appid': appid, 
             'total_reviews_collected': len(all_reviews),
             'pages_fetched': page_count, 
             'date_collected_utc': datetime.utcnow().isoformat(),
-            'max_pages_requested': max_pages
+            'target_count': final_target,
+            'start_time': start_time.isoformat()
         },
         'reviews': all_reviews
     }
 
-    # Handle cancellation - save checkpoint for resume
-    if cancel_event.is_set():
-        os.makedirs(TEMP_FOLDER, exist_ok=True)
-        with open(checkpoint_path, 'w', encoding='utf-8') as f:
-            json.dump({'reviews': all_reviews, 'next_cursor': cursor}, f)
-        status_queue.put(f"Progress saved. You can resume later.")
-        return None
-    elif os.path.exists(checkpoint_path):
-        os.remove(checkpoint_path)
+    # If task completed successfully (not cancelled, not error), delete checkpoint
+    if not cancel_event.is_set():
+        checkpoint_path = os.path.join(TEMP_FOLDER, checkpoint_filename)
+        if os.path.exists(checkpoint_path):
+            os.remove(checkpoint_path)
+            status_queue.put(f"Task completed - checkpoint file deleted.")
 
     return final_data
 
@@ -281,8 +413,8 @@ def save_reviews_to_json(data: Dict[str, Any], status_queue) -> None:
     """
     Save raw review data to JSON file with standardized naming.
     
-    File naming format: {appid}_{date}_{count}_reviews.json
-    Example: 1030300_2025-11-05_2000max_reviews.json
+    File naming format: {appid}_{date}_{time}_{targetcount}_{currentcount}_reviews.json
+    Example: 1030300_2025-11-06_14-30-45_5000_5000_reviews.json
     
     Args:
         data: Dictionary containing 'metadata' and 'reviews' keys
@@ -295,18 +427,27 @@ def save_reviews_to_json(data: Dict[str, Any], status_queue) -> None:
     metadata = data['metadata']
     appid = metadata['appid']
     total_reviews = metadata['total_reviews_collected']
-    today_str = datetime.utcnow().strftime('%Y-%m-%d')
+    target_count = metadata.get('target_count', total_reviews)
     
-    count_str = "all" if metadata.get('max_pages_requested') is None else f"{total_reviews}max"
-    filename = f"{appid}_{today_str}_{count_str}_reviews.json"
+    # Get start time from metadata, or use current time
+    start_time_str = metadata.get('start_time')
+    if start_time_str:
+        start_time = datetime.fromisoformat(start_time_str)
+    else:
+        start_time = datetime.now()
+    
+    date_str = start_time.strftime('%Y-%m-%d')
+    time_str = start_time.strftime('%H-%M-%S')
+    
+    filename = f"{appid}_{date_str}_{time_str}_{target_count}_{total_reviews}_reviews.json"
     
     os.makedirs(JSON_FOLDER, exist_ok=True)
     filepath = os.path.join(JSON_FOLDER, filename)
     
     try:
         with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-        status_queue.put(f"Raw review data saved to {filepath}")
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        status_queue.put(f"Raw review data saved to {filename}")
     except IOError as e:
         status_queue.put(f"Error saving raw JSON file: {e}")
 

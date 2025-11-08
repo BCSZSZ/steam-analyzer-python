@@ -17,6 +17,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import webbrowser
 import tempfile
+from utils import get_game_name
 
 
 class TimelineAnalysisTab(BaseTab):
@@ -73,16 +74,16 @@ class TimelineAnalysisTab(BaseTab):
         window_frame.pack(fill='x', pady=5)
         
         ttk.Label(window_frame, text="Rolling Window (days):").pack(side='left', padx=(0, 5))
-        self.rolling_window_var = tk.IntVar(value=7)
+        self.rolling_window_var = tk.IntVar(value=0)
         window_spin = ttk.Spinbox(
             window_frame,
-            from_=1,
+            from_=0,
             to=90,
             textvariable=self.rolling_window_var,
             width=10
         )
         window_spin.pack(side='left', padx=5)
-        ttk.Label(window_frame, text="(default: 7)", foreground='gray').pack(side='left', padx=5)
+        ttk.Label(window_frame, text="(0 = auto-determine)", foreground='gray').pack(side='left', padx=5)
         
         # Action buttons
         action_frame = ttk.Frame(params_frame)
@@ -129,14 +130,17 @@ class TimelineAnalysisTab(BaseTab):
         
         desc_text = (
             "Timeline Analysis visualizes review sentiment changes over time.\n\n"
-            "Two lines are displayed:\n"
+            "Four lines are displayed:\n"
             "• Rolling Average (blue): Shows X-day average positive rate (smoothed short-term trend)\n"
-            "• Cumulative Rate (red): Shows overall positive rate as it evolved over time\n\n"
+            "• Cumulative Rate (red dashed): Shows overall positive rate as it evolved over time\n"
+            "• Cumulative Review Count (green): Total number of reviews accumulated over time\n"
+            "• Cumulative Positive Count (orange): Total positive reviews accumulated over time\n\n"
+            "Rolling window is auto-determined based on date range (or set manually).\n"
             "The chart helps identify:\n"
             "• Launch reception and honeymoon periods\n"
             "• Impact of updates, DLCs, or controversies\n"
             "• Long-term sentiment trajectory\n"
-            "• Whether recent reviews are better or worse than historical average\n\n"
+            "• Review volume growth patterns\n\n"
             "Interactive features: Zoom, pan, hover for details. Opens in browser."
         )
         
@@ -174,7 +178,12 @@ class TimelineAnalysisTab(BaseTab):
             metadata = json_data.get('metadata', {})
             total_reviews = len(json_data.get('reviews', []))
             appid = metadata.get('appid', 'N/A')
-            game_title = metadata.get('game_title', 'N/A')
+            
+            # Use universal game name logic from cache
+            try:
+                game_title = get_game_name(int(appid)) if str(appid).isdigit() else metadata.get('game_title', 'N/A')
+            except:
+                game_title = metadata.get('game_title', 'N/A')
             
             self.data_info_label.config(
                 text=f"Loaded: {game_title} | {total_reviews:,} reviews | App ID: {appid}",
@@ -198,9 +207,8 @@ class TimelineAnalysisTab(BaseTab):
         language = self.language_var.get()
         rolling_window = self.rolling_window_var.get()
         
-        if rolling_window < 1:
-            messagebox.showwarning("Invalid Window", "Rolling window must be at least 1 day.")
-            return
+        # Note: rolling_window = 0 means auto-determine, which is valid
+        # No validation needed - analyzer will handle auto-determination
         
         # Disable UI
         self.analyze_btn.config(state='disabled')
@@ -260,14 +268,24 @@ class TimelineAnalysisTab(BaseTab):
         """Update info text with analysis results."""
         metadata = results['metadata']
         
+        # Calculate date range span
+        if metadata['date_range']['start'] and metadata['date_range']['end']:
+            from datetime import datetime
+            start = datetime.strptime(metadata['date_range']['start'], '%Y-%m-%d')
+            end = datetime.strptime(metadata['date_range']['end'], '%Y-%m-%d')
+            span_days = (end - start).days
+            span_info = f" ({span_days} days)"
+        else:
+            span_info = ""
+        
         info_text = (
             f"Total Reviews: {metadata['total_reviews']:,}\n"
             f"Positive Reviews: {metadata['total_positive']:,}\n"
             f"Negative Reviews: {metadata['total_negative']:,}\n"
             f"Overall Positive Rate: {metadata['overall_positive_rate']:.2f}%\n"
             f"Language Filter: {metadata['language']}\n"
-            f"Rolling Window: {metadata['rolling_window']} days\n"
-            f"Date Range: {metadata['date_range']['start']} to {metadata['date_range']['end']}"
+            f"Rolling Window: {metadata['rolling_window']} days (auto-determined)\n"
+            f"Date Range: {metadata['date_range']['start']} to {metadata['date_range']['end']}{span_info}"
         )
         
         self.info_text.config(state='normal')
@@ -293,60 +311,108 @@ class TimelineAnalysisTab(BaseTab):
         dates = [point['date'] for point in timeline]
         rolling_rates = [point['rolling_rate'] for point in timeline]
         cumulative_rates = [point['cumulative_rate'] for point in timeline]
+        cumulative_totals = [point['cumulative_total'] for point in timeline]
+        cumulative_positives = [point['cumulative_positive'] for point in timeline]
         daily_totals = [point['daily_total'] for point in timeline]
         
-        # Create figure
-        fig = go.Figure()
+        # Create figure with secondary y-axis
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
         
-        # Add rolling average line
+        # Add rolling average line (primary y-axis) - dots for rate
         fig.add_trace(go.Scatter(
             x=dates,
             y=rolling_rates,
-            mode='lines',
+            mode='lines+markers',
             name=f'{metadata["rolling_window"]}-day Rolling Avg',
-            line=dict(color='#2196F3', width=2.5),
+            line=dict(color='#2196F3', width=2),
+            marker=dict(size=4, color='#2196F3'),
             hovertemplate='<b>%{x}</b><br>' +
                          f'{metadata["rolling_window"]}-day Avg: ' + '%{y:.2f}%<br>' +
-                         '<extra></extra>'
-        ))
+                         '<extra></extra>',
+            yaxis='y'
+        ), secondary_y=False)
         
-        # Add cumulative rate line
+        # Add cumulative rate line (primary y-axis) - dots for rate
         fig.add_trace(go.Scatter(
             x=dates,
             y=cumulative_rates,
-            mode='lines',
+            mode='lines+markers',
             name='Cumulative Rate',
             line=dict(color='#F44336', width=2, dash='dash'),
+            marker=dict(size=4, color='#F44336'),
             hovertemplate='<b>%{x}</b><br>' +
                          'Cumulative Rate: %{y:.2f}%<br>' +
-                         '<extra></extra>'
-        ))
+                         '<extra></extra>',
+            yaxis='y'
+        ), secondary_y=False)
         
-        # Update layout
-        game_title = self.current_data.get('metadata', {}).get('game_title', 'Unknown Game')
+        # Add cumulative total count line (secondary y-axis)
+        fig.add_trace(go.Scatter(
+            x=dates,
+            y=cumulative_totals,
+            mode='lines',
+            name='Cumulative Review Count',
+            line=dict(color='#4CAF50', width=2),
+            hovertemplate='<b>%{x}</b><br>' +
+                         'Total Reviews: %{y:,}<br>' +
+                         '<extra></extra>',
+            yaxis='y2'
+        ), secondary_y=True)
+        
+        # Add cumulative positive count line (secondary y-axis)
+        fig.add_trace(go.Scatter(
+            x=dates,
+            y=cumulative_positives,
+            mode='lines',
+            name='Cumulative Positive Count',
+            line=dict(color='#FF9800', width=2),
+            hovertemplate='<b>%{x}</b><br>' +
+                         'Positive Reviews: %{y:,}<br>' +
+                         '<extra></extra>',
+            yaxis='y2'
+        ), secondary_y=True)
+        
+        # Update layout - use universal game name logic
+        metadata_dict = self.current_data.get('metadata', {})
+        appid = metadata_dict.get('appid', 0)
+        try:
+            game_title = get_game_name(int(appid)) if appid else metadata_dict.get('game_title', 'Unknown Game')
+        except:
+            game_title = metadata_dict.get('game_title', 'Unknown Game')
+        
         language_display = metadata['language'].upper() if metadata['language'] != 'all' else 'All Languages'
+        
+        # Update layout with dual y-axes
+        fig.update_xaxes(
+            title_text='Date',
+            showgrid=True,
+            gridcolor='rgba(128,128,128,0.2)'
+        )
+        
+        fig.update_yaxes(
+            title_text='Positive Rate (%)',
+            range=[0, 100],
+            showgrid=True,
+            gridcolor='rgba(128,128,128,0.2)',
+            secondary_y=False
+        )
+        
+        fig.update_yaxes(
+            title_text='Review Count',
+            showgrid=False,
+            secondary_y=True
+        )
         
         fig.update_layout(
             title=dict(
-                text=f"Review Sentiment Timeline - {game_title}<br><sub>{language_display}</sub>",
+                text=f"Review Sentiment Timeline - {game_title}<br><sub>{language_display} | {metadata['rolling_window']}-day window (auto-determined)</sub>",
                 x=0.5,
                 xanchor='center'
             ),
-            xaxis=dict(
-                title='Date',
-                showgrid=True,
-                gridcolor='rgba(128,128,128,0.2)'
-            ),
-            yaxis=dict(
-                title='Positive Rate (%)',
-                range=[0, 100],
-                showgrid=True,
-                gridcolor='rgba(128,128,128,0.2)'
-            ),
             hovermode='x unified',
             template='plotly_white',
-            width=1400,
-            height=700,
+            width=1800,
+            height=900,
             legend=dict(
                 x=0.01,
                 y=0.99,

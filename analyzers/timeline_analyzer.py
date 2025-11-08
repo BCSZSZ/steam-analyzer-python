@@ -29,14 +29,14 @@ class TimelineAnalyzer(BaseAnalyzer):
         super().__init__()
     
     def analyze(self, json_data: Dict[str, Any], language: str = 'all', 
-                rolling_window: int = 7) -> Dict[str, Any]:
+                rolling_window: int = None) -> Dict[str, Any]:
         """
         Analyze review timeline data.
         
         Args:
             json_data: Raw review data from Steam API
             language: Language filter ('all' or specific language code)
-            rolling_window: Number of days for rolling average (default 7)
+            rolling_window: Number of days for rolling average (None = auto-determine, default)
         
         Returns:
             Dictionary with timeline data and metadata
@@ -56,6 +56,10 @@ class TimelineAnalyzer(BaseAnalyzer):
         
         # Group reviews by date
         daily_data = self._group_by_date(reviews)
+        
+        # Auto-determine rolling window if not specified
+        if rolling_window is None or rolling_window == 0:
+            rolling_window = self._auto_determine_window(daily_data)
         
         # Calculate cumulative metrics
         timeline_data = self._calculate_timeline_metrics(
@@ -86,6 +90,43 @@ class TimelineAnalyzer(BaseAnalyzer):
         }
         
         return results
+    
+    def _auto_determine_window(self, daily_data: Dict[str, Dict[str, int]]) -> int:
+        """
+        Auto-determine rolling window based on date range.
+        
+        Logic:
+        - < 30 days: 3-day window
+        - 30-90 days: 7-day window
+        - 90-180 days: 14-day window
+        - 180-365 days: 30-day window
+        - > 365 days: 60-day window
+        
+        Args:
+            daily_data: Dictionary of daily review statistics
+        
+        Returns:
+            Recommended rolling window size in days
+        """
+        if not daily_data:
+            return 7  # Default fallback
+        
+        sorted_dates = sorted(daily_data.keys())
+        start_date = datetime.strptime(sorted_dates[0], '%Y-%m-%d')
+        end_date = datetime.strptime(sorted_dates[-1], '%Y-%m-%d')
+        
+        timespan_days = (end_date - start_date).days
+        
+        if timespan_days < 30:
+            return 3
+        elif timespan_days < 90:
+            return 7
+        elif timespan_days < 180:
+            return 14
+        elif timespan_days < 365:
+            return 30
+        else:
+            return 60
     
     def _group_by_date(self, reviews: List[Dict[str, Any]]) -> Dict[str, Dict[str, int]]:
         """
@@ -148,6 +189,7 @@ class TimelineAnalyzer(BaseAnalyzer):
         timeline = []
         cumulative_positive = 0
         cumulative_total = 0
+        previous_rolling_rate = None  # Failover for division by zero
         
         for i, date_str in enumerate(all_dates):
             day_data = daily_data.get(date_str, {'positive': 0, 'negative': 0, 'total': 0})
@@ -169,7 +211,13 @@ class TimelineAnalyzer(BaseAnalyzer):
                 rolling_positive += past_data['positive']
                 rolling_total += past_data['total']
             
-            rolling_rate = (rolling_positive / rolling_total * 100) if rolling_total > 0 else None
+            # Calculate rolling rate with failover
+            if rolling_total > 0:
+                rolling_rate = (rolling_positive / rolling_total * 100)
+                previous_rolling_rate = rolling_rate  # Save for future failover
+            else:
+                # Failover: use previous day's rolling rate if available
+                rolling_rate = previous_rolling_rate
             
             # Daily positive rate
             daily_rate = (day_data['positive'] / day_data['total'] * 100) if day_data['total'] > 0 else None
