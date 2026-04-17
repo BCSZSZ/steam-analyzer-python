@@ -87,6 +87,9 @@ class NgramAnalysisTab(BaseTab):
         ttk.Radiobutton(ngram_frame, text="2-gram (bigrams)", variable=self.ngram_size_var, value=2).pack(side=tk.LEFT, padx=10)
         ttk.Radiobutton(ngram_frame, text="3-gram (trigrams)", variable=self.ngram_size_var, value=3).pack(side=tk.LEFT, padx=10)
         
+        # Date range filter
+        self.create_date_filter(settings_frame)
+        
         # Minimum frequency threshold
         threshold_frame = ttk.Frame(settings_frame)
         threshold_frame.pack(fill=tk.X, pady=5)
@@ -384,6 +387,13 @@ class NgramAnalysisTab(BaseTab):
         sentiment = self.sentiment_var.get()
         ngram_size = self.ngram_size_var.get()
         
+        # Apply date filter
+        try:
+            filtered_data = self.get_date_filtered_data(self.current_data)
+        except ValueError:
+            messagebox.showerror("Invalid Date", "Date format must be YYYY-MM-DD.")
+            return
+        
         # Show progress message
         self.results_tree.delete(*self.results_tree.get_children())
         self.results_tree.insert('', tk.END, values=('', 'Analyzing... Please wait...', '', ''))
@@ -393,7 +403,7 @@ class NgramAnalysisTab(BaseTab):
             try:
                 analyzer = NgramAnalyzer()
                 results = analyzer.analyze(
-                    self.current_data,
+                    filtered_data,
                     language=language,
                     sentiment=sentiment,
                     ngram_size=ngram_size,

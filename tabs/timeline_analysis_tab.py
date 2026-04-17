@@ -85,6 +85,9 @@ class TimelineAnalysisTab(BaseTab):
         window_spin.pack(side='left', padx=5)
         ttk.Label(window_frame, text="(0 = auto-determine)", foreground='gray').pack(side='left', padx=5)
         
+        # Date range filter
+        self.create_date_filter(params_frame)
+        
         # Action buttons
         action_frame = ttk.Frame(params_frame)
         action_frame.pack(fill='x', pady=10)
@@ -207,6 +210,13 @@ class TimelineAnalysisTab(BaseTab):
         language = self.language_var.get()
         rolling_window = self.rolling_window_var.get()
         
+        # Apply date filter
+        try:
+            filtered_data = self.get_date_filtered_data(self.current_data)
+        except ValueError:
+            messagebox.showerror("Invalid Date", "Date format must be YYYY-MM-DD.")
+            return
+        
         # Note: rolling_window = 0 means auto-determine, which is valid
         # No validation needed - analyzer will handle auto-determination
         
@@ -217,7 +227,7 @@ class TimelineAnalysisTab(BaseTab):
         def run_analysis():
             try:
                 results = self.analyzer.analyze(
-                    self.current_data,
+                    filtered_data,
                     language=language,
                     rolling_window=rolling_window
                 )

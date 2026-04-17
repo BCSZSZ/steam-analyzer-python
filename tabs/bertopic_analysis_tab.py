@@ -135,6 +135,9 @@ class BERTopicAnalysisTab(BaseTab):
         self.top_n_words_var = tk.IntVar(value=10)
         ttk.Spinbox(words_frame, from_=5, to=20, textvariable=self.top_n_words_var, width=10).pack(side='left', padx=5)
         
+        # Date range filter
+        self.create_date_filter(params_frame)
+        
         # === Action Buttons ===
         action_frame = ttk.Frame(params_frame)
         action_frame.pack(fill='x', pady=10)
@@ -329,6 +332,13 @@ class BERTopicAnalysisTab(BaseTab):
         ngram_range = (ngram_start, ngram_end)
         top_n_words = self.top_n_words_var.get()
         
+        # Apply date filter
+        try:
+            filtered_data = self.get_date_filtered_data(self.current_data)
+        except ValueError:
+            messagebox.showerror("Invalid Date", "Date format must be YYYY-MM-DD.")
+            return
+        
         # Disable UI
         self.analyze_btn.config(state='disabled')
         self.status_label.config(text="Analyzing... This may take a few minutes.", foreground='blue')
@@ -336,7 +346,7 @@ class BERTopicAnalysisTab(BaseTab):
         def run_analysis():
             try:
                 results = self.analyzer.analyze(
-                    self.current_data,
+                    filtered_data,
                     language=language,
                     min_topic_size=min_topic_size,
                     ngram_range=ngram_range,

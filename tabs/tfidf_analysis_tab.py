@@ -75,6 +75,9 @@ class TfidfAnalysisTab(BaseTab):
         ttk.Radiobutton(ngram_frame, text="Bigrams (2-word phrases)", variable=self.ngram_var, value="2,2").pack(side=tk.LEFT, padx=10)
         ttk.Radiobutton(ngram_frame, text="Trigrams (3-word phrases)", variable=self.ngram_var, value="3,3").pack(side=tk.LEFT, padx=10)
         
+        # Date range filter
+        self.create_date_filter(settings_frame)
+        
         # Top N terms selection
         topn_frame = ttk.Frame(settings_frame)
         topn_frame.pack(fill=tk.X, pady=5)
@@ -430,6 +433,13 @@ class TfidfAnalysisTab(BaseTab):
         ngram_min, ngram_max = map(int, ngram_str.split(','))
         ngram_range = (ngram_min, ngram_max)
         
+        # Apply date filter
+        try:
+            filtered_data = self.get_date_filtered_data(self.current_data)
+        except ValueError:
+            messagebox.showerror("Invalid Date", "Date format must be YYYY-MM-DD.")
+            return
+        
         # Show progress message
         self.positive_tree.delete(*self.positive_tree.get_children())
         self.negative_tree.delete(*self.negative_tree.get_children())
@@ -441,7 +451,7 @@ class TfidfAnalysisTab(BaseTab):
             try:
                 analyzer = TfidfAnalyzer()
                 results = analyzer.analyze(
-                    self.current_data,
+                    filtered_data,
                     language=language,
                     top_n=top_n,
                     max_features=5000,

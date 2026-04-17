@@ -61,6 +61,11 @@ class DataCollectionTab(BaseTab):
         self.cancel_button = ttk.Button(input_frame, text="Cancel", command=self.cancel_download, state=tk.DISABLED)
         self.cancel_button.pack(side=tk.LEFT, padx=5)
 
+        # Date range filter
+        date_filter_frame = ttk.LabelFrame(self.frame, text="Date Filter (for Analyze from JSON)", padding="5")
+        date_filter_frame.pack(fill=tk.X, padx=10, pady=2)
+        self.create_date_filter(date_filter_frame)
+
         # Information display showing current dataset metadata
         info_frame = ttk.LabelFrame(self.frame, text="Current Data Information", padding="10")
         info_frame.pack(fill=tk.X, padx=10, pady=5)
@@ -86,7 +91,7 @@ class DataCollectionTab(BaseTab):
         columns = ('lang', 'lang_cn', 'total', 'positive', 'rate', 'category', 'category_cn', 
                    'avg_games_pos', 'avg_games_neg', 'avg_play_review_pos', 'avg_play_review_neg', 
                    'avg_play_forever_pos', 'avg_play_forever_neg')
-        self.tree = ttk.Treeview(table_frame, columns=columns, show='headings')
+        self.tree = ttk.Treeview(table_frame, columns=columns, show='headings', selectmode='extended')
         
         headings = {
             'lang': ('Language', 120), 'lang_cn': ('语言', 100), 
@@ -115,11 +120,18 @@ class DataCollectionTab(BaseTab):
         self.tree.configure(yscroll=scrollbar.set)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
+        # Combination counter for naming
+        self._combo_counter = 0
+
         # Status label for operation feedback
         log_frame = ttk.Frame(self.frame, padding="10")
         log_frame.pack(fill=tk.X)
+
+        self.calc_selected_btn = ttk.Button(log_frame, text="Calculate Selected Languages", command=self.calculate_selected_combination)
+        self.calc_selected_btn.pack(side=tk.LEFT, padx=5)
+
         self.status_label = ttk.Label(log_frame, text="Ready.", anchor=tk.W)
-        self.status_label.pack(fill=tk.X)
+        self.status_label.pack(fill=tk.X, side=tk.LEFT, expand=True)
 
     def cancel_download(self):
         """Signal cancellation of ongoing download operation."""
@@ -357,6 +369,7 @@ class DataCollectionTab(BaseTab):
     def run_backend_job_with_checkpoint(self, checkpoint_path, game_title):
         """
         Background worker that resumes from a specific checkpoint file.
+        All task parameters (appid, max_pages, target_count) come from checkpoint.
         
         Args:
             checkpoint_path: Path to checkpoint file
@@ -368,11 +381,21 @@ class DataCollectionTab(BaseTab):
                 checkpoint_data = json.load(f)
             
             appid = checkpoint_data.get('appid')
+            target_count = checkpoint_data.get('target_count', 0)
+            current_count = checkpoint_data.get('current_count', 0)
             
-            # Call backend with resume=True
+            # Log resume details
+            self.app.status_queue.put(f"Resuming App ID {appid} from {current_count:,}/{target_count:,} reviews")
+            print(f"[UI] Resuming from checkpoint: {checkpoint_path}")
+            print(f"[UI] App ID: {appid}, Current: {current_count:,}, Target: {target_count:,}")
+            
+            # Call backend with resume=True and explicit checkpoint_path
             scraped_data = backend.get_all_steam_reviews(
-                appid, status_queue=self.app.status_queue, max_pages=None,
-                cancel_event=self.app.cancel_event, resume=True
+                appid, 
+                status_queue=self.app.status_queue, 
+                cancel_event=self.app.cancel_event, 
+                resume=True,
+                checkpoint_path=checkpoint_path  # Pass the specific checkpoint file
             )
             
             if scraped_data:
@@ -382,7 +405,7 @@ class DataCollectionTab(BaseTab):
         except Exception as e:
             self.app.status_queue.put(f"Error during resume: {e}")
         finally:
-            self.app.status_queue.put("done")
+            self.app.status_queue.put({'type': 'done'})
 
     def run_backend_job(self, appid, max_pages, resume, game_title):
         """
@@ -448,6 +471,13 @@ class DataCollectionTab(BaseTab):
             with open(filepath, 'r', encoding='utf-8') as f:
                 review_data = json.load(f)
 
+            # Apply date filter
+            try:
+                review_data = self.get_date_filtered_data(review_data)
+            except ValueError:
+                self.app.status_queue.put("Error: Invalid date format. Use YYYY-MM-DD.")
+                return
+
             if review_data and review_data.get('reviews'):
                 appid = review_data.get('metadata', {}).get('appid', 'N/A')
                 final_title = utils.get_game_name(appid) if isinstance(appid, int) else f"AppID_{appid}"
@@ -478,6 +508,116 @@ class DataCollectionTab(BaseTab):
             report_data: List of dictionaries, each representing a row in the report
         """
         self.tree.delete(*self.tree.get_children())
+        self._combo_counter = 0
         for row_dict in report_data:
             values = list(row_dict.values())
             self.tree.insert('', tk.END, values=values)
+
+    def calculate_selected_combination(self):
+        """
+        Calculate combined stats for selected rows and append as a new row.
+        
+        Uses weighted averages for average columns (weighted by total/positive/negative counts).
+        """
+        selected = self.tree.selection()
+        if len(selected) < 2:
+            messagebox.showwarning("Selection Required", "Please select at least 2 language rows (Ctrl+Click or Shift+Click).")
+            return
+
+        # Parse selected rows
+        rows = []
+        lang_names = []
+        for item_id in selected:
+            vals = self.tree.item(item_id, 'values')
+            # vals order: lang, lang_cn, total, positive, rate, category, category_cn,
+            #   avg_games_pos, avg_games_neg, avg_play_review_pos, avg_play_review_neg,
+            #   avg_play_forever_pos, avg_play_forever_neg
+            try:
+                total = int(vals[2])
+                positive = int(vals[3])
+            except (ValueError, IndexError):
+                continue
+            negative = total - positive
+
+            def parse_float(v):
+                try:
+                    return float(str(v).strip('%'))
+                except (ValueError, TypeError):
+                    return 0.0
+
+            rows.append({
+                'lang': vals[0],
+                'total': total,
+                'positive': positive,
+                'negative': negative,
+                'avg_games_pos': parse_float(vals[7]),
+                'avg_games_neg': parse_float(vals[8]),
+                'avg_play_review_pos': parse_float(vals[9]),
+                'avg_play_review_neg': parse_float(vals[10]),
+                'avg_play_forever_pos': parse_float(vals[11]),
+                'avg_play_forever_neg': parse_float(vals[12]),
+            })
+            lang_names.append(vals[0])
+
+        if not rows:
+            messagebox.showwarning("No Data", "Selected rows contain no valid data.")
+            return
+
+        # Aggregate
+        total_all = sum(r['total'] for r in rows)
+        positive_all = sum(r['positive'] for r in rows)
+        negative_all = sum(r['negative'] for r in rows)
+
+        if total_all == 0:
+            messagebox.showwarning("No Data", "Total review count is 0.")
+            return
+
+        rate = (positive_all / total_all) * 100
+
+        # Weighted averages for positive-side metrics (weighted by positive count)
+        if positive_all > 0:
+            avg_games_pos = sum(r['avg_games_pos'] * r['positive'] for r in rows) / positive_all
+            avg_play_review_pos = sum(r['avg_play_review_pos'] * r['positive'] for r in rows) / positive_all
+            avg_play_forever_pos = sum(r['avg_play_forever_pos'] * r['positive'] for r in rows) / positive_all
+        else:
+            avg_games_pos = avg_play_review_pos = avg_play_forever_pos = 0.0
+
+        # Weighted averages for negative-side metrics (weighted by negative count)
+        if negative_all > 0:
+            avg_games_neg = sum(r['avg_games_neg'] * r['negative'] for r in rows) / negative_all
+            avg_play_review_neg = sum(r['avg_play_review_neg'] * r['negative'] for r in rows) / negative_all
+            avg_play_forever_neg = sum(r['avg_play_forever_neg'] * r['negative'] for r in rows) / negative_all
+        else:
+            avg_games_neg = avg_play_review_neg = avg_play_forever_neg = 0.0
+
+        # Determine category
+        from analyzers.language_report import CATEGORY_MAPPING
+        if rate >= 95.0:
+            category = "Overwhelmingly Positive"
+        elif rate >= 80.0:
+            category = "Very Positive"
+        elif rate >= 70.0:
+            category = "Mostly Positive"
+        elif rate >= 40.0:
+            category = "Mixed"
+        elif rate >= 20.0:
+            category = "Mostly Negative"
+        else:
+            category = "Very Negative"
+        category_cn = CATEGORY_MAPPING.get(category, '')
+
+        self._combo_counter += 1
+        combo_label = f"语言组合{self._combo_counter}"
+        langs_desc = " + ".join(lang_names)
+
+        new_row = (
+            langs_desc, combo_label,
+            total_all, positive_all,
+            f"{rate:.2f}%", category, category_cn,
+            f"{avg_games_pos:.1f}", f"{avg_games_neg:.1f}",
+            f"{avg_play_review_pos:.1f}", f"{avg_play_review_neg:.1f}",
+            f"{avg_play_forever_pos:.1f}", f"{avg_play_forever_neg:.1f}"
+        )
+
+        self.tree.insert('', tk.END, values=new_row)
+        self.status_label.config(text=f"Added {combo_label}: {langs_desc} ({total_all:,} reviews)")

@@ -87,6 +87,9 @@ venv.bak/
 *.swp
 *.swo
 
+# uv
+uv.lock
+
 # Temporary data files
 *.json
 *.csv

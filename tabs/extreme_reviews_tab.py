@@ -55,6 +55,11 @@ class ExtremeReviewsTab(BaseTab):
         
         self.current_results = None
         
+        # Date range filter
+        date_filter_frame = ttk.LabelFrame(self.frame, text="Date Filter", padding="10")
+        date_filter_frame.pack(fill=tk.X, padx=10, pady=5)
+        self.create_date_filter(date_filter_frame)
+        
         # Information display showing dataset metadata and filter status
         info_frame = ttk.LabelFrame(self.frame, text="Dataset Information", padding="10")
         info_frame.pack(fill=tk.X, padx=10, pady=5)
@@ -117,6 +122,13 @@ class ExtremeReviewsTab(BaseTab):
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
                 json_data = json.load(f)
+            
+            # Apply date filter
+            try:
+                json_data = self.get_date_filtered_data(json_data)
+            except ValueError:
+                messagebox.showerror("Invalid Date", "Date format must be YYYY-MM-DD.")
+                return
             
             analyzer = PlaytimeExtremesAnalyzer()
             results = analyzer.analyze(json_data)

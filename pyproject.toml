@@ -1,0 +1,20 @@
+[project]
+name = "steam-analyzer-python"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "bertopic>=0.17.4",
+    "customtkinter>=5.2.2",
+    "hdbscan>=0.8.42",
+    "jieba>=0.42.1",
+    "matplotlib>=3.10.8",
+    "nltk>=3.9.4",
+    "pillow>=12.2.0",
+    "plotly>=6.7.0",
+    "requests>=2.33.1",
+    "scikit-learn>=1.8.0",
+    "sentence-transformers>=5.4.1",
+    "umap-learn>=0.5.12",
+    "wordcloud>=1.9.6",
+]
